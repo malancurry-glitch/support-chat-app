@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Ticket</title>
+<script src="https://cdn.socket.io/4.0.1/socket.io.min.js"></script>
+
+<style>
+body {
+    margin:0;
+    font-family:-apple-system,BlinkMacSystemFont,sans-serif;
+    background:#eef1f5;
+}
+
+/* Layout */
+.container {
+    max-width:750px;
+    margin:40px auto;
+    background:white;
+    border-radius:12px;
+    display:flex;
+    flex-direction:column;
+    height:85vh;
+    box-shadow:0 10px 40px rgba(0,0,0,0.1);
+}
+
+/* Header */
+.header {
+    padding:15px;
+    border-bottom:1px solid #eee;
+    display:flex;
+    justify-content:space-between;
+}
+
+.status {
+    font-size:12px;
+    color:#22c55e;
+}
+
+/* Messages */
+.messages {
+    flex:1;
+    padding:20px;
+    overflow-y:auto;
+    display:flex;
+    flex-direction:column;
+}
+
+/* Bubble */
+.bubble {
+    max-width:75%;
+    padding:12px;
+    margin:8px 0;
+    border-radius:12px;
+}
+
+.user { background:#dbeafe; align-self:flex-start; }
+.admin { background:#dcfce7; align-self:flex-end; }
+
+/* Media */
+.bubble img, .bubble video {
+    max-width:220px;
+    border-radius:8px;
+    margin-top:5px;
+}
+
+/* Time */
+.time {
+    font-size:10px;
+    opacity:0.6;
+}
+
+/* Download */
+.download {
+    font-size:12px;
+    display:block;
+    margin-top:5px;
+    color:#2563eb;
+}
+
+/* Typing */
+.typing {
+    font-size:12px;
+    color:#888;
+    padding-left:10px;
+}
+
+/* Input */
+.input-box {
+    display:flex;
+    padding:15px;
+    border-top:1px solid #eee;
+}
+
+input {
+    flex:1;
+    padding:12px;
+    border-radius:8px;
+    border:1px solid #ccc;
+}
+
+button {
+    margin-left:10px;
+    padding:12px;
+    border:none;
+    border-radius:8px;
+    background:#2563eb;
+    color:white;
+    cursor:pointer;
+}
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+<div class="header">
+    <div>Ticket #{{ticket_id}}</div>
+    <div class="status">● Active</div>
+</div>
+
+<div id="messages" class="messages">
+
+{% for msg in messages %}
+<div class="bubble {{msg[0]}}">
+    {% if "[FILE]" in msg[1] %}
+        {% set file = msg[1].replace("[FILE] ", "") %}
+        {% if file.endswith(('.jpg','.jpeg','.png','.gif','.webp')) %}
+            <img src="/uploads/{{file}}">
+        {% elif file.endswith(('.mp4','.webm','.ogg')) %}
+            <video controls>
+                <source src="/uploads/{{file}}">
+            </video>
+        {% else %}
+            <a href="/uploads/{{file}}" target="_blank">📎 {{file}}</a>
+        {% endif %}
+        <a class="download" href="/download/{{file}}">⬇ Download</a>
+    {% else %}
+        {{msg[1]}}
+    {% endif %}
+    <div class="time">{{msg[2]}}</div>
+</div>
+{% endfor %}
+
+</div>
+
+<div id="typing" class="typing"></div>
+
+<div class="input-box">
+    <input id="message" placeholder="Reply..." onkeypress="handleKey(event)">
+    <input type="file" id="fileInput" hidden>
+    <button onclick="upload()">📎</button>
+    <button onclick="sendMessage()">Send</button>
+</div>
+
+</div>
+
+<script>
+var socket = io();
+var ticket_id = "{{ticket_id}}";
+let box = document.getElementById("messages");
+
+// Scroll
+function scrollDown(){
+    box.scrollTop = box.scrollHeight;
+}
+scrollDown();
+
+// Add message
+function addMessage(msg, sender, time=""){
+    let div = document.createElement("div");
+    div.className = "bubble " + sender;
+
+    if(msg.startsWith("[FILE]")){
+        let file = msg.replace("[FILE] ","");
+        let url = "/uploads/" + file;
+        let download = "/download/" + file;
+        let ext = file.split('.').pop().toLowerCase();
+
+        if(["jpg","jpeg","png","gif","webp"].includes(ext)){
+            div.innerHTML = `<img src="${url}"><a class="download" href="${download}">⬇ Download</a>`;
+        }
+        else if(["mp4","webm","ogg"].includes(ext)){
+            div.innerHTML = `<video controls><source src="${url}"></video><a class="download" href="${download}">⬇ Download</a>`;
+        }
+        else{
+            div.innerHTML = `<a href="${url}" target="_blank">📎 ${file}</a><a class="download" href="${download}">⬇ Download</a>`;
+        }
+    } else {
+        div.innerHTML = msg;
+    }
+
+    div.innerHTML += `<div class="time">${time}</div>`;
+
+    box.appendChild(div);
+    scrollDown();
+}
+
+// Send message
+function sendMessage(){
+    let msg = message.value.trim();
+    if(!msg) return;
+
+    socket.emit('send_message',{
+        ticket_id,
+        sender:'user',
+        message:msg
+    });
+
+    addMessage(msg,"user",new Date().toLocaleTimeString());
+    message.value="";
+}
+
+// Upload file
+function upload(){
+    fileInput.click();
+}
+
+fileInput.onchange = ()=>{
+    let file = fileInput.files[0];
+    let form = new FormData();
+    form.append("file", file);
+
+    fetch(`/upload/${ticket_id}`,{
+        method:"POST",
+        body:form
+    }).then(()=> addMessage("[FILE] "+file.name,"user"));
+};
+
+// Receive
+socket.on('new_message', data=>{
+    if(data.ticket_id===ticket_id){
+        addMessage(data.message,data.sender,data.time);
+    }
+});
+
+// Typing
+message.addEventListener("input",()=>{
+    socket.emit('typing',{});
+});
+
+socket.on('typing',()=>{
+    typing.innerText="Support typing...";
+    setTimeout(()=>typing.innerText="",1500);
+});
+
+// Enter
+function handleKey(e){
+    if(e.key==="Enter") sendMessage();
+}
+</script>
+
+</body>
+</html>

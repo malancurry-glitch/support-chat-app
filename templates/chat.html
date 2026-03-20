@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Support Widget</title>
+<script src="https://cdn.socket.io/4.0.1/socket.io.min.js"></script>
+
+<style>
+body { margin:0; font-family:-apple-system,BlinkMacSystemFont,sans-serif; }
+
+/* Button */
+.chat-btn {
+    position:fixed;
+    bottom:20px;
+    right:20px;
+    width:60px;
+    height:60px;
+    border-radius:50%;
+    background:#2563eb;
+    color:white;
+    display:flex;
+    justify-content:center;
+    align-items:center;
+    cursor:pointer;
+    transition:0.2s;
+}
+
+/* Chat */
+.chat {
+    position:fixed;
+    bottom:90px;
+    right:20px;
+    width:360px;
+    height:520px;
+    background:#111b21;
+    border-radius:16px;
+    display:none;
+    flex-direction:column;
+    overflow:hidden;
+    box-shadow:0 10px 40px rgba(0,0,0,0.5);
+}
+
+/* Header */
+.header {
+    background:#202c33;
+    padding:12px;
+    color:white;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+}
+
+.status {
+    font-size:12px;
+    color:#4ade80;
+}
+
+/* Messages */
+.messages {
+    flex:1;
+    padding:12px;
+    overflow-y:auto;
+    display:flex;
+    flex-direction:column;
+}
+
+/* Bubble */
+.msg {
+    max-width:75%;
+    padding:10px;
+    border-radius:10px;
+    margin:6px 0;
+    font-size:14px;
+}
+
+.user { background:#005c4b; color:white; align-self:flex-end; }
+.support { background:#202c33; color:white; align-self:flex-start; }
+
+/* Time */
+.time {
+    font-size:10px;
+    opacity:0.6;
+    margin-top:4px;
+}
+
+/* Typing */
+.typing {
+    font-size:12px;
+    color:#aaa;
+}
+
+/* Input */
+.input-box {
+    display:flex;
+    padding:10px;
+    background:#202c33;
+}
+
+input {
+    flex:1;
+    padding:10px;
+    border:none;
+    border-radius:20px;
+    background:#2a3942;
+    color:white;
+}
+
+button {
+    margin-left:5px;
+    border:none;
+    padding:10px;
+    border-radius:50%;
+    background:#25d366;
+    color:white;
+    cursor:pointer;
+}
+
+/* Overlay */
+.overlay {
+    position:absolute;
+    width:100%;
+    height:100%;
+    background:rgba(0,0,0,0.7);
+    display:flex;
+    justify-content:center;
+    align-items:center;
+}
+
+.box {
+    background:white;
+    padding:20px;
+    border-radius:10px;
+}
+</style>
+</head>
+
+<body>
+
+<div class="chat-btn" onclick="toggleChat()">💬</div>
+
+<div id="chatBox" class="chat">
+
+<div class="header">
+    <div>Support</div>
+    <div class="status">● Online</div>
+</div>
+
+<div id="messages" class="messages">
+    <div style="color:#888;text-align:center;">Start a conversation 👋</div>
+</div>
+
+<div id="typing" class="typing"></div>
+
+<div class="input-box">
+    <input id="message" placeholder="Type..." disabled>
+    <input type="file" id="fileInput" hidden>
+    <button onclick="upload()">📎</button>
+    <button onclick="sendMessage()">➤</button>
+</div>
+
+<div id="overlay" class="overlay">
+    <div class="box">
+        <h3>Start Chat</h3>
+        <input id="email" placeholder="Email"><br><br>
+        <button onclick="startTicket()">Start</button>
+    </div>
+</div>
+
+</div>
+
+<script>
+var socket = io();
+var ticket_id = localStorage.getItem("ticket_id");
+
+// Toggle
+function toggleChat(){
+    let box = document.getElementById("chatBox");
+    box.style.display = box.style.display === "flex" ? "none" : "flex";
+}
+
+// Time helper
+function now(){
+    let d = new Date();
+    return d.getHours()+":"+String(d.getMinutes()).padStart(2,'0');
+}
+
+// Add message
+function addMessage(msg, sender){
+    let div = document.createElement("div");
+    div.className = "msg " + sender;
+
+    div.innerHTML = `
+        ${msg}
+        <div class="time">${now()}</div>
+    `;
+
+    let box = document.getElementById("messages");
+    box.appendChild(div);
+    box.scrollTop = box.scrollHeight;
+}
+
+// Restore
+if(ticket_id){
+    document.getElementById("overlay").style.display="none";
+    document.getElementById("message").disabled=false;
+
+    fetch(`/api/history/${ticket_id}`)
+    .then(r=>r.json())
+    .then(data=>{
+        document.getElementById("messages").innerHTML="";
+        data.forEach(m=>addMessage(m.message,m.sender));
+    });
+}
+
+// Start
+function startTicket(){
+    let email = document.getElementById("email").value;
+    if(!email) return;
+
+    socket.emit('start_ticket',{email});
+}
+
+// Created
+socket.on('ticket_created', data=>{
+    ticket_id = data.ticket_id;
+    localStorage.setItem("ticket_id", ticket_id);
+
+    document.getElementById("overlay").style.display="none";
+    document.getElementById("message").disabled=false;
+
+    addMessage("Hi 👋 How can we help?","support");
+});
+
+// Send
+function sendMessage(){
+    let msg = document.getElementById("message").value;
+    if(!msg || !ticket_id) return;
+
+    socket.emit('send_message',{
+        ticket_id,
+        sender:'user',
+        message:msg
+    });
+
+    addMessage(msg,"user");
+    document.getElementById("message").value="";
+}
+
+// Upload
+function upload(){
+    fileInput.click();
+}
+
+fileInput.onchange = ()=>{
+    let file = fileInput.files[0];
+
+    let form = new FormData();
+    form.append("file", file);
+
+    fetch(`/upload/${ticket_id}`, {
+        method:"POST",
+        body:form
+    }).then(()=> addMessage("📎 "+file.name,"user"));
+};
+
+// Receive
+socket.on('new_message', data=>{
+    if(data.sender==='admin'){
+        addMessage(data.message,"support");
+        notify();
+    }
+});
+
+// Typing
+socket.on('typing', ()=>{
+    let t=document.getElementById("typing");
+    t.innerText="Agent typing...";
+    setTimeout(()=>t.innerText="",1500);
+});
+
+document.getElementById("message").addEventListener("input", ()=>{
+    socket.emit('typing',{});
+});
+
+// Enter
+document.getElementById("message").addEventListener("keypress", e=>{
+    if(e.key==="Enter") sendMessage();
+});
+
+// Sound
+function notify(){
+    new Audio("https://www.soundjay.com/buttons/sounds/button-3.mp3").play();
+}
+</script>
+
+</body>
+</html>

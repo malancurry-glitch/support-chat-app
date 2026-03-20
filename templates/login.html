@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Admin Login</title>
+
+<style>
+body {
+    margin:0;
+    font-family:-apple-system,BlinkMacSystemFont,sans-serif;
+    background:#0f172a;
+    display:flex;
+    justify-content:center;
+    align-items:center;
+    height:100vh;
+}
+
+/* Card */
+.login-card {
+    background:white;
+    padding:30px;
+    border-radius:12px;
+    width:320px;
+    box-shadow:0 10px 40px rgba(0,0,0,0.3);
+}
+
+/* Title */
+h2 {
+    margin-bottom:10px;
+}
+
+.subtitle {
+    font-size:13px;
+    color:#6b7280;
+    margin-bottom:20px;
+}
+
+/* Inputs */
+.input-group {
+    margin-bottom:15px;
+}
+
+input {
+    width:100%;
+    padding:12px;
+    border-radius:8px;
+    border:1px solid #d1d5db;
+    font-size:14px;
+}
+
+input:focus {
+    border-color:#2563eb;
+    outline:none;
+}
+
+/* Error */
+.error {
+    color:red;
+    font-size:12px;
+    margin-top:4px;
+}
+
+/* Button */
+button {
+    width:100%;
+    padding:12px;
+    background:#2563eb;
+    color:white;
+    border:none;
+    border-radius:8px;
+    font-size:15px;
+    cursor:pointer;
+}
+
+button:hover {
+    background:#1d4ed8;
+}
+
+/* Footer */
+.footer {
+    margin-top:15px;
+    font-size:12px;
+    text-align:center;
+    color:#6b7280;
+}
+</style>
+</head>
+
+<body>
+
+<div class="login-card">
+
+    <h2>Admin Login</h2>
+    <div class="subtitle">Access your support dashboard</div>
+
+    <form method="POST" onsubmit="return validateForm()">
+
+        <div class="input-group">
+            <input id="username" name="username" placeholder="Username">
+            <div id="userError" class="error"></div>
+        </div>
+
+        <div class="input-group">
+            <input id="password" name="password" type="password" placeholder="Password">
+            <div id="passError" class="error"></div>
+        </div>
+
+        <button type="submit">Login</button>
+
+    </form>
+
+    <div class="footer">
+        Support System Admin Panel
+    </div>
+
+</div>
+
+<script>
+function validateForm() {
+    let valid = true;
+
+    let user = document.getElementById("username").value;
+    let pass = document.getElementById("password").value;
+
+    document.getElementById("userError").innerText = "";
+    document.getElementById("passError").innerText = "";
+
+    if (user.length < 3) {
+        document.getElementById("userError").innerText = "Username required";
+        valid = false;
+    }
+
+    if (pass.length < 3) {
+        document.getElementById("passError").innerText = "Password required";
+        valid = false;
+    }
+
+    return valid;
+}
+</script>
+
+</body>
+</html>

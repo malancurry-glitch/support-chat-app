@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Submit a Request</title>
+
+<style>
+:root { --primary:#2563eb; }
+
+body {
+    margin:0;
+    font-family:-apple-system,BlinkMacSystemFont,sans-serif;
+    background:#f3f4f6;
+}
+
+/* Header */
+.header { text-align:center; padding:30px; }
+.logo { height:50px; }
+
+/* Card */
+.container {
+    max-width:650px;
+    margin:auto;
+    background:white;
+    padding:30px;
+    border-radius:12px;
+    box-shadow:0 10px 30px rgba(0,0,0,0.1);
+}
+
+/* Steps */
+.step { display:none; }
+.active { display:block; }
+
+/* Inputs */
+.input-group { margin-bottom:20px; }
+
+input, textarea, select {
+    width:100%;
+    padding:12px;
+    border-radius:8px;
+    border:1px solid #ccc;
+}
+
+/* Counter */
+.counter {
+    font-size:12px;
+    text-align:right;
+    color:#666;
+}
+
+/* File */
+.file-box {
+    border:2px dashed #ccc;
+    padding:20px;
+    text-align:center;
+    border-radius:10px;
+    cursor:pointer;
+}
+
+.file-box.drag {
+    border-color:var(--primary);
+    background:#eef4ff;
+}
+
+/* Buttons */
+.btn {
+    padding:12px;
+    border:none;
+    border-radius:8px;
+    background:var(--primary);
+    color:white;
+    cursor:pointer;
+    width:100%;
+}
+
+.btn.secondary { background:#ccc; }
+
+/* Summary */
+.summary {
+    background:#f9fafb;
+    padding:15px;
+    border-radius:10px;
+}
+
+/* Success */
+.success {
+    display:none;
+    text-align:center;
+}
+</style>
+</head>
+
+<body>
+
+<div class="header">
+    <img src="/static/logo.png" class="logo">
+</div>
+
+<div class="container">
+
+<!-- STEP 1 -->
+<div id="step1" class="step active">
+<h3>Contact Info</h3>
+
+<div class="input-group">
+<input id="email" placeholder="Email">
+</div>
+
+<button class="btn" onclick="nextStep(2)">Next</button>
+</div>
+
+<!-- STEP 2 -->
+<div id="step2" class="step">
+<h3>Issue Details</h3>
+
+<div class="input-group">
+<label>Select Issue</label>
+<select id="issueType" onchange="autoFill()">
+<option value="">-- Select Issue --</option>
+<option>Withdrawal</option>
+<option>Deposit</option>
+<option>SMS not received</option>
+<option>Email not received</option>
+<option>Code not received</option>
+<option>Change of address</option>
+<option>Change of email address</option>
+<option>Change of phone number</option>
+<option>Change of name</option>
+</select>
+</div>
+
+<div class="input-group">
+<label>Subject</label>
+<input id="subject">
+</div>
+
+<div class="input-group">
+<label>Description</label>
+<textarea id="message" oninput="countChars()"></textarea>
+<div class="counter" id="counter">0/500</div>
+</div>
+
+<button class="btn secondary" onclick="nextStep(1)">Back</button>
+<button class="btn" onclick="nextStep(3)">Next</button>
+</div>
+
+<!-- STEP 3 -->
+<div id="step3" class="step">
+<h3>Attachments</h3>
+
+<div id="dropZone" class="file-box">
+<input type="file" id="fileInput" hidden>
+<p>Drop file or click</p>
+<div id="fileName"></div>
+</div>
+
+<button class="btn secondary" onclick="nextStep(2)">Back</button>
+<button class="btn" onclick="showSummary()">Next</button>
+</div>
+
+<!-- STEP 4 -->
+<div id="step4" class="step">
+<h3>Review</h3>
+
+<div class="summary">
+<p><b>Email:</b> <span id="sumEmail"></span></p>
+<p><b>Issue:</b> <span id="sumIssue"></span></p>
+<p><b>Subject:</b> <span id="sumSubject"></span></p>
+<p><b>Message:</b> <span id="sumMessage"></span></p>
+</div>
+
+<button class="btn secondary" onclick="nextStep(3)">Back</button>
+<button class="btn" onclick="submitTicket()">Submit</button>
+</div>
+
+<!-- SUCCESS -->
+<div id="successBox" class="success">
+<h3>✅ Ticket Created</h3>
+<p id="ticketId"></p>
+</div>
+
+</div>
+
+<script>
+// Step navigation
+function nextStep(n){
+    document.querySelectorAll(".step").forEach(s=>s.classList.remove("active"));
+    document.getElementById("step"+n).classList.add("active");
+}
+
+// Character counter
+function countChars(){
+    counter.innerText = message.value.length + "/500";
+}
+
+// Auto-fill subject + message
+function autoFill(){
+    let issue = issueType.value;
+    if(!issue) return;
+
+    subject.value = issue + " Issue";
+    message.value = `Hello,\n\nI am experiencing an issue with: ${issue}.\n\nDetails:\n`;
+    countChars();
+}
+
+// Summary
+function showSummary(){
+    sumEmail.innerText = email.value;
+    sumIssue.innerText = issueType.value;
+    sumSubject.innerText = subject.value;
+    sumMessage.innerText = message.value;
+    nextStep(4);
+}
+
+// Submit
+async function submitTicket(){
+    let formData = new FormData();
+    formData.append("email", email.value);
+    formData.append("subject", subject.value);
+    formData.append("message", message.value);
+    formData.append("priority","Medium");
+
+    if(fileInput.files[0]){
+        formData.append("file", fileInput.files[0]);
+    }
+
+    let res = await fetch("/", { method:"POST", body:formData });
+
+    if(res.redirected){
+        window.location.href = res.url;
+    } else {
+        alert("Error submitting ticket");
+    }
+}
+
+// File handling
+dropZone.onclick = () => fileInput.click();
+
+fileInput.onchange = () => {
+    if(fileInput.files[0]){
+        fileName.innerText = fileInput.files[0].name;
+    }
+};
+
+dropZone.addEventListener("dragover", e=>{
+    e.preventDefault();
+    dropZone.classList.add("drag");
+});
+
+dropZone.addEventListener("drop", e=>{
+    e.preventDefault();
+    fileInput.files = e.dataTransfer.files;
+    fileName.innerText = fileInput.files[0].name;
+});
+</script>
+
+</body>
+</html>

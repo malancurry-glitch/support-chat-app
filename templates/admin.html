@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Admin Dashboard</title>
+<script src="https://cdn.socket.io/4.0.1/socket.io.min.js"></script>
+
+<style>
+body {
+    margin:0;
+    font-family:-apple-system,BlinkMacSystemFont,sans-serif;
+    display:flex;
+    height:100vh;
+    background:#f3f4f6;
+}
+
+/* NAV */
+.nav {
+    width:70px;
+    background:#111827;
+    color:white;
+    display:flex;
+    justify-content:center;
+    align-items:center;
+    font-size:20px;
+}
+
+/* SIDEBAR */
+.sidebar {
+    width:320px;
+    background:#1f2937;
+    color:white;
+    display:flex;
+    flex-direction:column;
+}
+
+/* Search */
+.search { padding:10px; }
+.search input {
+    width:100%;
+    padding:8px;
+    border-radius:6px;
+    border:none;
+}
+
+/* Filters */
+.filters {
+    display:flex;
+    justify-content:space-around;
+    padding:5px;
+}
+.filter {
+    cursor:pointer;
+    padding:4px 8px;
+}
+.active-filter {
+    background:#2563eb;
+    border-radius:5px;
+}
+
+/* Tickets */
+.ticket-list { overflow-y:auto; flex:1; }
+.ticket {
+    padding:12px;
+    border-bottom:1px solid #374151;
+    cursor:pointer;
+}
+.ticket:hover { background:#374151; }
+.active-ticket { background:#2563eb; }
+
+/* MAIN */
+.main {
+    flex:1;
+    display:flex;
+    flex-direction:column;
+}
+
+/* HEADER */
+.header {
+    padding:15px;
+    background:white;
+    border-bottom:1px solid #ddd;
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+}
+
+/* Buttons */
+.header button {
+    margin-left:10px;
+    padding:6px 10px;
+    border:none;
+    border-radius:6px;
+    cursor:pointer;
+}
+
+.close { background:#ef4444; color:white; }
+.open { background:#22c55e; color:white; }
+
+/* Messages */
+.messages {
+    flex:1;
+    padding:20px;
+    overflow-y:auto;
+    display:flex;
+    flex-direction:column;
+}
+
+/* Bubble */
+.bubble {
+    max-width:65%;
+    padding:12px;
+    margin:6px 0;
+    border-radius:10px;
+}
+.user { background:#e0f2fe; align-self:flex-start; }
+.admin { background:#dcfce7; align-self:flex-end; }
+
+/* Media */
+.bubble img, .bubble video {
+    max-width:220px;
+    border-radius:8px;
+    cursor:pointer;
+}
+
+/* Download */
+.download {
+    display:block;
+    font-size:12px;
+    margin-top:5px;
+    color:#2563eb;
+}
+
+/* Typing */
+.typing {
+    font-size:12px;
+    color:#888;
+    padding-left:10px;
+}
+
+/* Input */
+.input-box {
+    display:flex;
+    padding:10px;
+    border-top:1px solid #ddd;
+}
+
+input {
+    flex:1;
+    padding:10px;
+    border-radius:8px;
+    border:1px solid #ccc;
+}
+
+button.send {
+    margin-left:10px;
+    padding:10px;
+    background:#2563eb;
+    color:white;
+    border:none;
+    border-radius:8px;
+}
+
+/* MODAL */
+.modal {
+    position:fixed;
+    top:0;
+    left:0;
+    width:100%;
+    height:100%;
+    background:rgba(0,0,0,0.8);
+    display:none;
+    justify-content:center;
+    align-items:center;
+}
+
+.modal img, .modal video {
+    max-width:80%;
+    max-height:80%;
+}
+</style>
+</head>
+
+<body>
+
+<div class="nav">💬</div>
+
+<div class="sidebar">
+
+<div class="search">
+    <input id="search" placeholder="Search..." oninput="filterTickets()">
+</div>
+
+<div class="filters">
+    <div class="filter active-filter" onclick="setFilter('all')">All</div>
+    <div class="filter" onclick="setFilter('open')">Open</div>
+    <div class="filter" onclick="setFilter('closed')">Closed</div>
+</div>
+
+<div id="ticketList" class="ticket-list">
+{% for t in tickets %}
+<div class="ticket" data-id="{{t[0]}}" data-status="{{t[4]}}" onclick="loadTicket('{{t[0]}}', this)">
+    <b>{{t[2]}}</b><br>
+    <small>{{t[1]}}</small>
+</div>
+{% endfor %}
+</div>
+
+</div>
+
+<div class="main">
+
+<div class="header">
+    <div id="ticketTitle">Select a ticket</div>
+    <div>
+        <button class="open" onclick="openTicket()">Open</button>
+        <button class="close" onclick="closeTicket()">Close</button>
+    </div>
+</div>
+
+<div id="messages" class="messages"></div>
+<div id="typing" class="typing"></div>
+
+<div class="input-box">
+    <input id="message" placeholder="Reply..." onkeypress="handleKey(event)">
+    <button class="send" onclick="sendReply()">Send</button>
+</div>
+
+</div>
+
+<!-- MODAL -->
+<div id="modal" class="modal" onclick="closeModal()"></div>
+
+<script>
+var socket = io();
+let currentTicket = null;
+let filter = "all";
+
+function loadTicket(id, el) {
+    currentTicket = id;
+
+    document.querySelectorAll(".ticket").forEach(t => t.classList.remove("active-ticket"));
+    el.classList.add("active-ticket");
+
+    fetch(`/api/history/${id}`)
+    .then(res => res.json())
+    .then(data => {
+        ticketTitle.innerText = "Ticket: " + id;
+
+        messages.innerHTML = "";
+        data.forEach(msg => addMessage(msg.message, msg.sender, msg.time));
+    });
+}
+
+function addMessage(msg, sender, time="") {
+    let div = document.createElement("div");
+    div.className = "bubble " + sender;
+
+    if (msg.startsWith("[FILE]")) {
+        let file = msg.replace("[FILE] ", "");
+        let url = "/uploads/" + file;
+        let download = "/download/" + file;
+        let ext = file.split('.').pop().toLowerCase();
+
+        if (["jpg","png","jpeg","gif"].includes(ext)) {
+            div.innerHTML = `<img src="${url}" onclick="openModal('${url}','img')">
+                             <a class="download" href="${download}">⬇ Download</a>`;
+        }
+        else if (["mp4","webm"].includes(ext)) {
+            div.innerHTML = `<video onclick="openModal('${url}','video')" controls>
+                                <source src="${url}">
+                             </video>
+                             <a class="download" href="${download}">⬇ Download</a>`;
+        }
+        else {
+            div.innerHTML = `<a href="${url}" target="_blank">📎 ${file}</a>
+                             <a class="download" href="${download}">⬇ Download</a>`;
+        }
+    } else {
+        div.innerHTML = msg;
+    }
+
+    div.innerHTML += `<div class="time">${time}</div>`;
+    messages.appendChild(div);
+    messages.scrollTop = messages.scrollHeight;
+}
+
+function sendReply() {
+    let msg = message.value;
+    if (!msg || !currentTicket) return;
+
+    socket.emit('send_message', {
+        ticket_id: currentTicket,
+        sender: 'admin',
+        message: msg
+    });
+
+    addMessage(msg, 'admin');
+    message.value = "";
+}
+
+function closeTicket(){
+    if(currentTicket) window.location.href = "/close/" + currentTicket;
+}
+
+function openTicket(){
+    alert("Reopen logic can be added");
+}
+
+function openModal(url,type){
+    modal.style.display="flex";
+    modal.innerHTML = type==="img"
+        ? `<img src="${url}">`
+        : `<video controls autoplay><source src="${url}"></video>`;
+}
+
+function closeModal(){
+    modal.style.display="none";
+}
+</script>
+
+</body>
+</html>
