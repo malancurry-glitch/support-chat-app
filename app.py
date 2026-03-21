@@ -105,6 +105,31 @@ def send_telegram(text):
         print("❌ Telegram send error:", e)
 
 
+def send_telegram(text):
+    try:
+        token = os.getenv("TELEGRAM_BOT_TOKEN")
+        chat_id = os.getenv("TELEGRAM_CHAT_ID")
+
+        print("TOKEN:", token)
+        print("CHAT_ID:", chat_id)
+
+        if not token or not chat_id:
+            print("❌ Telegram env missing")
+            return
+
+        url = f"https://api.telegram.org/bot{token}/sendMessage"
+
+        res = requests.post(url, json={
+            "chat_id": chat_id,
+            "text": text
+        })
+
+        print("TELEGRAM RESPONSE:", res.text)
+
+    except Exception as e:
+        print("❌ Telegram error:", e)
+
+
 # ---------------- TELEGRAM RECEIVE ----------------
 @app.route('/telegram', methods=['POST'])
 def telegram_webhook():
