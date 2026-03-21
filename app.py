@@ -16,6 +16,7 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 
 UPLOAD_FOLDER = 'uploads'
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
 ALLOWED_EXTENSIONS = {'png','jpg','jpeg','gif','webp','mp4','webm','pdf','txt'}
@@ -32,6 +33,38 @@ def get_db():
     return conn
 
 
+# ---------------- INIT DB ----------------
+def init_db():
+    conn = get_db()
+    c = conn.cursor()
+
+    c.execute('''
+    CREATE TABLE IF NOT EXISTS tickets (
+        id TEXT PRIMARY KEY,
+        email TEXT,
+        subject TEXT,
+        priority TEXT,
+        status TEXT,
+        assigned_to TEXT,
+        created_at TEXT
+    )''')
+
+    c.execute('''
+    CREATE TABLE IF NOT EXISTS messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ticket_id TEXT,
+        sender TEXT,
+        message TEXT,
+        timestamp TEXT
+    )''')
+
+    conn.commit()
+    conn.close()
+
+init_db()
+
+
+# ---------------- TICKET ID ----------------
 def generate_ticket_id():
     conn = get_db()
     c = conn.cursor()
@@ -39,7 +72,7 @@ def generate_ticket_id():
     c.execute("SELECT id FROM tickets ORDER BY rowid DESC LIMIT 1")
     last = c.fetchone()
 
-    if last:
+    if last and last["id"]:
         try:
             num = int(last["id"].replace("SUP-", ""))
         except:
@@ -51,83 +84,72 @@ def generate_ticket_id():
     return f"SUP-{num+1}"
 
 
-# ---------------- TELEGRAM ----------------
-def get_admins():
-    ids = os.getenv("TELEGRAM_CHAT_IDS", "")
-    return [i.strip() for i in ids.split(",") if i.strip()]
+# ---------------- TELEGRAM SEND ----------------
+def send_telegram(text):
+    try:
+        token = os.getenv("TELEGRAM_BOT_TOKEN")
+        chat_id = os.getenv("TELEGRAM_CHAT_ID")
 
+        if not token or not chat_id:
+            print("⚠️ Telegram not configured")
+            return
 
-def send_telegram(text, buttons=None):
-    token = os.getenv("TELEGRAM_BOT_TOKEN")
+        url = f"https://api.telegram.org/bot{token}/sendMessage"
 
-    for chat_id in get_admins():
-        payload = {
+        requests.post(url, json={
             "chat_id": chat_id,
             "text": text
-        }
+        })
 
-        if buttons:
-            payload["reply_markup"] = {"inline_keyboard": buttons}
-
-        requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json=payload)
+    except Exception as e:
+        print("❌ Telegram send error:", e)
 
 
-# ---------------- TELEGRAM WEBHOOK ----------------
+# ---------------- TELEGRAM RECEIVE ----------------
 @app.route('/telegram', methods=['POST'])
 def telegram_webhook():
-    data = request.json
+    try:
+        data = request.get_json(force=True)
 
-    print("📩 TELEGRAM:", data)
+        print("📩 TELEGRAM RECEIVED:", data)
 
-    # BUTTON CLICK
-    if "callback_query" in data:
-        cb = data["callback_query"]
-        action = cb["data"]
+        if not data or "message" not in data:
+            return "ok"
 
-        if action.startswith("close_"):
-            ticket_id = action.replace("close_", "")
+        text = data["message"].get("text", "").strip()
 
-            conn = get_db()
-            c = conn.cursor()
-            c.execute("UPDATE tickets SET status='closed' WHERE id=?", (ticket_id,))
-            conn.commit()
-            conn.close()
+        if ":" not in text:
+            send_telegram("❌ Use format:\nSUP-1001: your message")
+            return "ok"
 
-            send_telegram(f"✅ Ticket {ticket_id} closed")
+        ticket_id, msg = text.split(":", 1)
+        ticket_id = ticket_id.strip()
+        msg = msg.strip()
 
-        return "ok"
+        now = datetime.datetime.now().strftime('%H:%M')
 
-    # MESSAGE REPLY
-    if "message" not in data:
-        return "ok"
+        conn = get_db()
+        c = conn.cursor()
 
-    text = data["message"].get("text", "")
+        c.execute("""
+        INSERT INTO messages VALUES (NULL, ?, ?, ?, ?)
+        """, (ticket_id, "admin", msg, now))
 
-    if ":" not in text:
-        send_telegram("❌ Use format:\nSUP-1001: your message")
-        return "ok"
+        conn.commit()
+        conn.close()
 
-    ticket_id, msg = text.split(":", 1)
-    ticket_id = ticket_id.strip()
-    msg = msg.strip()
+        # 🔥 send to frontend
+        socketio.emit('new_message', {
+            "ticket_id": ticket_id,
+            "message": msg,
+            "sender": "admin",
+            "time": now
+        })
 
-    now = datetime.datetime.now().strftime('%H:%M')
+        send_telegram(f"✅ Sent to {ticket_id}")
 
-    conn = get_db()
-    c = conn.cursor()
-    c.execute("INSERT INTO messages VALUES (NULL, ?, ?, ?, ?)",
-              (ticket_id, "admin", msg, now))
-    conn.commit()
-    conn.close()
-
-    socketio.emit('new_message', {
-        "ticket_id": ticket_id,
-        "message": msg,
-        "sender": "admin",
-        "time": now
-    })
-
-    send_telegram(f"💬 Sent to {ticket_id}")
+    except Exception as e:
+        print("❌ TELEGRAM ERROR:", e)
 
     return "ok"
 
@@ -147,6 +169,7 @@ def download_file(filename):
 @app.route('/', methods=['GET','POST'])
 def create_ticket():
     if request.method == 'POST':
+
         email = request.form.get('email')
         subject = request.form.get('subject')
         message = request.form.get('message')
@@ -166,20 +189,21 @@ def create_ticket():
         conn.commit()
         conn.close()
 
-        # 🔥 TELEGRAM ALERT + BUTTONS
-        send_telegram(
-            f"🚨 New Ticket\n\nID: {ticket_id}\nUser: {email}\n{message}",
-            buttons=[
-                [{"text": "❌ Close", "callback_data": f"close_{ticket_id}"}]
-            ]
-        )
+        send_telegram(f"""
+🚨 New Ticket
+
+ID: {ticket_id}
+User: {email}
+Subject: {subject}
+
+{message}
+""")
 
         return redirect(url_for('view_ticket', ticket_id=ticket_id))
 
     return render_template('create_ticket.html')
 
 
-# ---------------- VIEW ----------------
 @app.route('/ticket/<ticket_id>')
 def view_ticket(ticket_id):
     conn = get_db()
@@ -197,8 +221,10 @@ def view_ticket(ticket_id):
 def admin_dashboard():
     conn = get_db()
     c = conn.cursor()
+
     c.execute("SELECT * FROM tickets ORDER BY created_at DESC")
     tickets = c.fetchall()
+
     conn.close()
 
     return render_template('admin.html', tickets=tickets)
@@ -207,6 +233,7 @@ def admin_dashboard():
 # ---------------- SOCKET ----------------
 @socketio.on('send_message')
 def handle_message(data):
+
     now = datetime.datetime.now().strftime('%H:%M')
 
     conn = get_db()
@@ -214,10 +241,18 @@ def handle_message(data):
 
     c.execute("INSERT INTO messages VALUES (NULL, ?, ?, ?, ?)",
               (data['ticket_id'], data['sender'], data['message'], now))
+
     conn.commit()
     conn.close()
 
-    send_telegram(f"💬 {data['ticket_id']} ({data['sender']}): {data['message']}")
+    send_telegram(f"""
+💬 Message
+
+Ticket: {data['ticket_id']}
+From: {data['sender']}
+
+{data['message']}
+""")
 
     emit('new_message', {
         "ticket_id": data['ticket_id'],
@@ -229,4 +264,4 @@ def handle_message(data):
 
 # ---------------- RUN ----------------
 if __name__ == '__main__':
-    socketio.run(app, host="0.0.0.0", port=10000)
+    socketio.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
