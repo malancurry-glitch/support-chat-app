@@ -8,32 +8,37 @@
 body {
     margin:0;
     font-family:-apple-system,BlinkMacSystemFont,sans-serif;
-    background:#eef1f5;
+    background:linear-gradient(135deg,#eef2ff,#f8fafc);
 }
 
 /* Layout */
 .container {
-    max-width:750px;
-    margin:40px auto;
+    max-width:800px;
+    margin:30px auto;
     background:white;
-    border-radius:12px;
+    border-radius:16px;
     display:flex;
     flex-direction:column;
-    height:85vh;
-    box-shadow:0 10px 40px rgba(0,0,0,0.1);
+    height:88vh;
+    box-shadow:0 15px 50px rgba(0,0,0,0.12);
+    overflow:hidden;
 }
 
 /* Header */
 .header {
-    padding:15px;
-    border-bottom:1px solid #eee;
+    padding:16px;
+    background:#2563eb;
+    color:white;
     display:flex;
     justify-content:space-between;
+    align-items:center;
 }
 
 .status {
     font-size:12px;
-    color:#22c55e;
+    background:#22c55e;
+    padding:4px 8px;
+    border-radius:20px;
 }
 
 /* Messages */
@@ -43,69 +48,104 @@ body {
     overflow-y:auto;
     display:flex;
     flex-direction:column;
+    gap:8px;
+    background:#f9fafb;
 }
 
 /* Bubble */
 .bubble {
-    max-width:75%;
-    padding:12px;
-    margin:8px 0;
-    border-radius:12px;
+    max-width:70%;
+    padding:12px 14px;
+    border-radius:14px;
+    font-size:14px;
+    line-height:1.4;
+    animation:fadeIn 0.2s ease;
 }
 
-.user { background:#dbeafe; align-self:flex-start; }
-.admin { background:#dcfce7; align-self:flex-end; }
+.user {
+    background:#2563eb;
+    color:white;
+    align-self:flex-end;
+    border-bottom-right-radius:4px;
+}
+
+.admin {
+    background:#e5e7eb;
+    color:#111827;
+    align-self:flex-start;
+    border-bottom-left-radius:4px;
+}
 
 /* Media */
 .bubble img, .bubble video {
-    max-width:220px;
-    border-radius:8px;
-    margin-top:5px;
+    max-width:240px;
+    border-radius:10px;
+    margin-top:6px;
 }
 
 /* Time */
 .time {
     font-size:10px;
     opacity:0.6;
+    margin-top:4px;
+    text-align:right;
 }
 
 /* Download */
 .download {
-    font-size:12px;
+    font-size:11px;
     display:block;
-    margin-top:5px;
+    margin-top:4px;
     color:#2563eb;
 }
 
 /* Typing */
 .typing {
     font-size:12px;
-    color:#888;
+    color:#6b7280;
     padding-left:10px;
 }
 
 /* Input */
 .input-box {
     display:flex;
-    padding:15px;
+    padding:12px;
     border-top:1px solid #eee;
+    background:white;
 }
 
 input {
     flex:1;
     padding:12px;
-    border-radius:8px;
-    border:1px solid #ccc;
+    border-radius:20px;
+    border:1px solid #ddd;
+    outline:none;
+    transition:0.2s;
+}
+
+input:focus {
+    border-color:#2563eb;
 }
 
 button {
-    margin-left:10px;
-    padding:12px;
+    margin-left:8px;
+    padding:12px 14px;
     border:none;
-    border-radius:8px;
+    border-radius:50%;
     background:#2563eb;
     color:white;
     cursor:pointer;
+    transition:0.2s;
+}
+
+button:hover {
+    background:#1d4ed8;
+}
+
+/* Animation */
+@keyframes fadeIn {
+    from {opacity:0; transform:translateY(5px);}
+    to {opacity:1; transform:translateY(0);}
 }
 </style>
 </head>
@@ -115,7 +155,7 @@ button {
 <div class="container">
 
 <div class="header">
-    <div>Ticket #{{ticket_id}}</div>
+    <div><b>Ticket #{{ticket_id}}</b></div>
     <div class="status">● Active</div>
 </div>
 
@@ -147,10 +187,10 @@ button {
 <div id="typing" class="typing"></div>
 
 <div class="input-box">
-    <input id="message" placeholder="Reply..." onkeypress="handleKey(event)">
+    <input id="message" placeholder="Type a message..." onkeypress="handleKey(event)">
     <input type="file" id="fileInput" hidden>
     <button onclick="upload()">📎</button>
-    <button onclick="sendMessage()">Send</button>
+    <button onclick="sendMessage()">➤</button>
 </div>
 
 </div>
@@ -191,7 +231,6 @@ function addMessage(msg, sender, time=""){
     }
 
     div.innerHTML += `<div class="time">${time}</div>`;
-
     box.appendChild(div);
     scrollDown();
 }
@@ -240,7 +279,7 @@ message.addEventListener("input",()=>{
 });
 
 socket.on('typing',()=>{
-    typing.innerText="Support typing...";
+    typing.innerText="Support is typing...";
     setTimeout(()=>typing.innerText="",1500);
 });
 

@@ -83,7 +83,6 @@ def generate_ticket_id():
     conn.close()
     return f"SUP-{num+1}"
 
-
 # ---------------- TELEGRAM SEND ----------------
 def send_telegram(text):
     try:
@@ -105,7 +104,32 @@ def send_telegram(text):
         print("❌ Telegram send error:", e)
 
 
+# 🔥 ADD THIS FUNCTION (NEW)
+def download_telegram_file(file_id):
+    try:
+        token = os.getenv("TELEGRAM_BOT_TOKEN")
 
+        file_info = requests.get(
+            f"https://api.telegram.org/bot{token}/getFile?file_id={file_id}"
+        ).json()
+
+        file_path = file_info["result"]["file_path"]
+
+        file_url = f"https://api.telegram.org/file/bot{token}/{file_path}"
+        file_data = requests.get(file_url).content
+
+        filename = file_path.split("/")[-1]
+
+        save_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+
+        with open(save_path, "wb") as f:
+            f.write(file_data)
+
+        return filename
+
+    except Exception as e:
+        print("❌ FILE DOWNLOAD ERROR:", e)
+        return None
 
 
 # ---------------- TELEGRAM RECEIVE ----------------
@@ -126,6 +150,88 @@ def telegram_webhook():
             print("❌ No message object")
             return "ok"
 
+        # ---------------- 🆕 IMAGE SUPPORT ----------------
+        if "photo" in msg_obj:
+            photo = msg_obj["photo"][-1]
+            file_id = photo["file_id"]
+
+            filename = download_telegram_file(file_id)
+
+            if filename:
+                caption = msg_obj.get("caption", "")
+
+                if ":" in caption:
+                    ticket_id = caption.split(":")[0].strip()
+                else:
+                    send_telegram("❌ Add ticket ID in caption:\nSUP-1001")
+                    return "ok"
+
+                now = datetime.datetime.now().strftime('%H:%M')
+
+                conn = get_db()
+                c = conn.cursor()
+
+                c.execute(
+                    "INSERT INTO messages VALUES (NULL, ?, ?, ?, ?)",
+                    (ticket_id, "admin", f"[FILE] {filename}", now)
+                )
+
+                conn.commit()
+                conn.close()
+
+                socketio.emit('new_message', {
+                    "ticket_id": ticket_id,
+                    "message": f"[FILE] {filename}",
+                    "sender": "admin",
+                    "time": now
+                })
+
+                send_telegram(f"📷 Image sent to {ticket_id}")
+
+            return "ok"
+
+
+        # ---------------- 🆕 VIDEO SUPPORT ----------------
+        if "video" in msg_obj:
+            file_id = msg_obj["video"]["file_id"]
+
+            filename = download_telegram_file(file_id)
+
+            if filename:
+                caption = msg_obj.get("caption", "")
+
+                if ":" in caption:
+                    ticket_id = caption.split(":")[0].strip()
+                else:
+                    send_telegram("❌ Add ticket ID in caption:\nSUP-1001")
+                    return "ok"
+
+                now = datetime.datetime.now().strftime('%H:%M')
+
+                conn = get_db()
+                c = conn.cursor()
+
+                c.execute(
+                    "INSERT INTO messages VALUES (NULL, ?, ?, ?, ?)",
+                    (ticket_id, "admin", f"[FILE] {filename}", now)
+                )
+
+                conn.commit()
+                conn.close()
+
+                socketio.emit('new_message', {
+                    "ticket_id": ticket_id,
+                    "message": f"[FILE] {filename}",
+                    "sender": "admin",
+                    "time": now
+                })
+
+                send_telegram(f"🎥 Video sent to {ticket_id}")
+
+            return "ok"
+
+
+        # ---------------- EXISTING TEXT LOGIC ----------------
         text = msg_obj.get("text", "").strip()
         print("TEXT:", text)
 
@@ -180,7 +286,6 @@ def telegram_webhook():
         conn.commit()
         conn.close()
 
-        # 🔥 REAL-TIME UPDATE
         socketio.emit('new_message', {
             "ticket_id": ticket_id,
             "message": msg,
