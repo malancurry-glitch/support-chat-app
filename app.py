@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, jsonify, send_from_directory, abort
+from flask import Flask, render_template, request, redirect, url_for, jsonify, send_from_directory
 from flask_socketio import SocketIO, emit
 import sqlite3
 import datetime
@@ -9,14 +9,13 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-app = Flask(__name__, template_folder="templates")
+app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "dev-secret")
 
 socketio = SocketIO(app, cors_allowed_origins="*")
 
 UPLOAD_FOLDER = 'uploads'
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
 ALLOWED_EXTENSIONS = {'png','jpg','jpeg','gif','webp','mp4','webm','pdf','txt'}
@@ -31,6 +30,11 @@ def get_db():
     conn = sqlite3.connect('database.db')
     conn.row_factory = sqlite3.Row
     return conn
+
+
+def get_admins():
+    ids = os.getenv("TELEGRAM_CHAT_IDS", "")
+    return [i.strip() for i in ids.split(",") if i.strip()]
 
 
 # ---------------- INIT DB ----------------
@@ -72,7 +76,7 @@ def generate_ticket_id():
     c.execute("SELECT id FROM tickets ORDER BY rowid DESC LIMIT 1")
     last = c.fetchone()
 
-    if last and last["id"]:
+    if last:
         try:
             num = int(last["id"].replace("SUP-", ""))
         except:
@@ -84,94 +88,84 @@ def generate_ticket_id():
     return f"SUP-{num+1}"
 
 
-# ---------------- TELEGRAM SEND ----------------
+# ---------------- TELEGRAM ----------------
 def send_telegram(text):
-    try:
-        token = os.getenv("TELEGRAM_BOT_TOKEN")
-        chat_id = os.getenv("TELEGRAM_CHAT_ID")
+    token = os.getenv("TELEGRAM_BOT_TOKEN")
 
-        if not token or not chat_id:
-            print("⚠️ Telegram not configured")
-            return
-
-        url = f"https://api.telegram.org/bot{token}/sendMessage"
-
-        requests.post(url, json={
-            "chat_id": chat_id,
-            "text": text
-        })
-
-    except Exception as e:
-        print("❌ Telegram send error:", e)
+    for chat_id in get_admins():
+        requests.post(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            json={"chat_id": chat_id, "text": text}
+        )
 
 
-def send_telegram(text):
-    try:
-        token = os.getenv("TELEGRAM_BOT_TOKEN")
-        chat_id = os.getenv("TELEGRAM_CHAT_ID")
-
-        print("TOKEN:", token)
-        print("CHAT_ID:", chat_id)
-
-        if not token or not chat_id:
-            print("❌ Telegram env missing")
-            return
-
-        url = f"https://api.telegram.org/bot{token}/sendMessage"
-
-        res = requests.post(url, json={
-            "chat_id": chat_id,
-            "text": text
-        })
-
-        print("TELEGRAM RESPONSE:", res.text)
-
-    except Exception as e:
-        print("❌ Telegram error:", e)
-
-
-# ---------------- TELEGRAM RECEIVE ----------------
+# ---------------- TELEGRAM WEBHOOK ----------------
 @app.route('/telegram', methods=['POST'])
 def telegram_webhook():
     try:
         data = request.get_json(force=True)
+        print("📩 TELEGRAM:", data)
 
-        print("📩 TELEGRAM RECEIVED:", data)
-
-        if not data or "message" not in data:
+        msg_obj = data.get("message")
+        if not msg_obj:
             return "ok"
 
-        text = data["message"].get("text", "").strip()
+        text = msg_obj.get("text", "").strip()
 
+        # 🔴 CLOSE
+        if text.lower().startswith("close "):
+            ticket_id = text.replace("close ", "").strip()
+
+            conn = get_db()
+            c = conn.cursor()
+            c.execute("UPDATE tickets SET status='closed' WHERE id=?", (ticket_id,))
+            conn.commit()
+            conn.close()
+
+            send_telegram(f"🔒 Ticket {ticket_id} closed")
+            return "ok"
+
+        # 🟢 OPEN
+        if text.lower().startswith("open "):
+            ticket_id = text.replace("open ", "").strip()
+
+            conn = get_db()
+            c = conn.cursor()
+            c.execute("UPDATE tickets SET status='open' WHERE id=?", (ticket_id,))
+            conn.commit()
+            conn.close()
+
+            send_telegram(f"🟢 Ticket {ticket_id} reopened")
+            return "ok"
+
+        # 💬 REPLY
         if ":" not in text:
-            send_telegram("❌ Use format:\nSUP-1001: your message")
+            send_telegram("❌ Format:\nSUP-1001: message")
             return "ok"
 
-        ticket_id, msg = text.split(":", 1)
+        ticket_id, message = text.split(":", 1)
         ticket_id = ticket_id.strip()
-        msg = msg.strip()
+        message = message.strip()
 
         now = datetime.datetime.now().strftime('%H:%M')
 
         conn = get_db()
         c = conn.cursor()
 
-        c.execute("""
-        INSERT INTO messages VALUES (NULL, ?, ?, ?, ?)
-        """, (ticket_id, "admin", msg, now))
+        c.execute("INSERT INTO messages VALUES (NULL, ?, ?, ?, ?)",
+                  (ticket_id, "admin", message, now))
 
         conn.commit()
         conn.close()
 
-        # 🔥 send to frontend
         socketio.emit('new_message', {
             "ticket_id": ticket_id,
-            "message": msg,
+            "message": message,
             "sender": "admin",
             "time": now
         })
 
-        send_telegram(f"✅ Sent to {ticket_id}")
+        send_telegram(f"💬 Sent to {ticket_id}")
 
     except Exception as e:
         print("❌ TELEGRAM ERROR:", e)
@@ -179,54 +173,36 @@ def telegram_webhook():
     return "ok"
 
 
-# ---------------- FILE ROUTES ----------------
-@app.route('/uploads/<filename>')
-def uploaded_file(filename):
-    return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
-
-
-@app.route('/download/<filename>')
-def download_file(filename):
-    return send_from_directory(app.config['UPLOAD_FOLDER'], filename, as_attachment=True)
-
-
-# ---------------- CREATE TICKET ----------------
-@app.route('/', methods=['GET','POST'])
-def create_ticket():
-    if request.method == 'POST':
-
-        email = request.form.get('email')
-        subject = request.form.get('subject')
-        message = request.form.get('message')
-
-        ticket_id = generate_ticket_id()
-        now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-
-        conn = get_db()
-        c = conn.cursor()
-
-        c.execute("INSERT INTO tickets VALUES (?, ?, ?, ?, ?, ?, ?)",
-                  (ticket_id, email, subject, "Medium", "open", None, now))
-
-        c.execute("INSERT INTO messages VALUES (NULL, ?, ?, ?, ?)",
-                  (ticket_id, "user", message, now))
-
-        conn.commit()
-        conn.close()
-
-        send_telegram(f"""
-🚨 New Ticket
-
-ID: {ticket_id}
-User: {email}
-Subject: {subject}
-
-{message}
-""")
-
-        return redirect(url_for('view_ticket', ticket_id=ticket_id))
-
+# ---------------- ROUTES ----------------
+@app.route('/')
+def home():
     return render_template('create_ticket.html')
+
+
+@app.route('/create', methods=['POST'])
+def create_ticket():
+    email = request.form.get('email')
+    subject = request.form.get('subject')
+    message = request.form.get('message')
+
+    ticket_id = generate_ticket_id()
+    now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+    conn = get_db()
+    c = conn.cursor()
+
+    c.execute("INSERT INTO tickets VALUES (?, ?, ?, ?, ?, ?, ?)",
+              (ticket_id, email, subject, "Medium", "open", None, now))
+
+    c.execute("INSERT INTO messages VALUES (NULL, ?, ?, ?, ?)",
+              (ticket_id, "user", message, now))
+
+    conn.commit()
+    conn.close()
+
+    send_telegram(f"🚨 New Ticket\n\n{ticket_id}\n{message}")
+
+    return redirect(url_for('view_ticket', ticket_id=ticket_id))
 
 
 @app.route('/ticket/<ticket_id>')
@@ -255,10 +231,41 @@ def admin_dashboard():
     return render_template('admin.html', tickets=tickets)
 
 
+@app.route('/close/<ticket_id>')
+def close_ticket(ticket_id):
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("UPDATE tickets SET status='closed' WHERE id=?", (ticket_id,))
+    conn.commit()
+    conn.close()
+    return "ok"
+
+
+@app.route('/open/<ticket_id>')
+def open_ticket(ticket_id):
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("UPDATE tickets SET status='open' WHERE id=?", (ticket_id,))
+    conn.commit()
+    conn.close()
+    return "ok"
+
+
+@app.route('/api/history/<ticket_id>')
+def history(ticket_id):
+    conn = get_db()
+    c = conn.cursor()
+
+    c.execute("SELECT sender,message,timestamp FROM messages WHERE ticket_id=?", (ticket_id,))
+    data = [{"sender": r["sender"], "message": r["message"], "time": r["timestamp"]} for r in c.fetchall()]
+
+    conn.close()
+    return jsonify(data)
+
+
 # ---------------- SOCKET ----------------
 @socketio.on('send_message')
 def handle_message(data):
-
     now = datetime.datetime.now().strftime('%H:%M')
 
     conn = get_db()
@@ -270,14 +277,7 @@ def handle_message(data):
     conn.commit()
     conn.close()
 
-    send_telegram(f"""
-💬 Message
-
-Ticket: {data['ticket_id']}
-From: {data['sender']}
-
-{data['message']}
-""")
+    send_telegram(f"💬 {data['ticket_id']} ({data['sender']}): {data['message']}")
 
     emit('new_message', {
         "ticket_id": data['ticket_id'],

@@ -33,7 +33,6 @@ body {
     flex-direction:column;
 }
 
-/* Search */
 .search { padding:10px; }
 .search input {
     width:100%;
@@ -42,30 +41,34 @@ body {
     border:none;
 }
 
-/* Filters */
 .filters {
     display:flex;
     justify-content:space-around;
     padding:5px;
 }
-.filter {
-    cursor:pointer;
-    padding:4px 8px;
-}
-.active-filter {
-    background:#2563eb;
-    border-radius:5px;
-}
+.filter { cursor:pointer; padding:4px 8px; }
+.active-filter { background:#2563eb; border-radius:5px; }
 
-/* Tickets */
 .ticket-list { overflow-y:auto; flex:1; }
+
 .ticket {
     padding:12px;
     border-bottom:1px solid #374151;
     cursor:pointer;
 }
+
 .ticket:hover { background:#374151; }
 .active-ticket { background:#2563eb; }
+
+.status-badge {
+    font-size:10px;
+    padding:2px 6px;
+    border-radius:4px;
+    margin-left:6px;
+}
+
+.open-badge { background:#22c55e; }
+.closed-badge { background:#ef4444; }
 
 /* MAIN */
 .main {
@@ -74,7 +77,6 @@ body {
     flex-direction:column;
 }
 
-/* HEADER */
 .header {
     padding:15px;
     background:white;
@@ -84,9 +86,7 @@ body {
     align-items:center;
 }
 
-/* Buttons */
-.header button {
-    margin-left:10px;
+button {
     padding:6px 10px;
     border:none;
     border-radius:6px;
@@ -105,39 +105,21 @@ body {
     flex-direction:column;
 }
 
-/* Bubble */
 .bubble {
     max-width:65%;
     padding:12px;
     margin:6px 0;
     border-radius:10px;
 }
+
 .user { background:#e0f2fe; align-self:flex-start; }
 .admin { background:#dcfce7; align-self:flex-end; }
 
-/* Media */
-.bubble img, .bubble video {
-    max-width:220px;
-    border-radius:8px;
-    cursor:pointer;
+.time {
+    font-size:10px;
+    opacity:0.6;
 }
 
-/* Download */
-.download {
-    display:block;
-    font-size:12px;
-    margin-top:5px;
-    color:#2563eb;
-}
-
-/* Typing */
-.typing {
-    font-size:12px;
-    color:#888;
-    padding-left:10px;
-}
-
-/* Input */
 .input-box {
     display:flex;
     padding:10px;
@@ -151,13 +133,10 @@ input {
     border:1px solid #ccc;
 }
 
-button.send {
+.send {
     margin-left:10px;
-    padding:10px;
     background:#2563eb;
     color:white;
-    border:none;
-    border-radius:8px;
 }
 
 /* MODAL */
@@ -175,7 +154,6 @@ button.send {
 
 .modal img, .modal video {
     max-width:80%;
-    max-height:80%;
 }
 </style>
 </head>
@@ -185,7 +163,6 @@ button.send {
 <div class="nav">💬</div>
 
 <div class="sidebar">
-
 <div class="search">
     <input id="search" placeholder="Search..." oninput="filterTickets()">
 </div>
@@ -199,123 +176,90 @@ button.send {
 <div id="ticketList" class="ticket-list">
 {% for t in tickets %}
 <div class="ticket" data-id="{{t[0]}}" data-status="{{t[4]}}" onclick="loadTicket('{{t[0]}}', this)">
-    <b>{{t[2]}}</b><br>
+    <b>{{t[2]}}</b>
+    <span class="status-badge {{ 'open-badge' if t[4]=='open' else 'closed-badge' }}">
+        {{t[4]}}
+    </span>
+    <br>
     <small>{{t[1]}}</small>
 </div>
 {% endfor %}
 </div>
-
 </div>
 
 <div class="main">
-
 <div class="header">
     <div id="ticketTitle">Select a ticket</div>
     <div>
-        <button class="open" onclick="openTicket()">Open</button>
+        <button class="open" onclick="openTicket()">Reopen</button>
         <button class="close" onclick="closeTicket()">Close</button>
     </div>
 </div>
 
 <div id="messages" class="messages"></div>
-<div id="typing" class="typing"></div>
 
 <div class="input-box">
     <input id="message" placeholder="Reply..." onkeypress="handleKey(event)">
     <button class="send" onclick="sendReply()">Send</button>
 </div>
-
 </div>
 
-<!-- MODAL -->
 <div id="modal" class="modal" onclick="closeModal()"></div>
 
 <script>
 var socket = io();
 let currentTicket = null;
-let filter = "all";
 
-function loadTicket(id, el) {
+function loadTicket(id, el){
     currentTicket = id;
-
-    document.querySelectorAll(".ticket").forEach(t => t.classList.remove("active-ticket"));
+    document.querySelectorAll(".ticket").forEach(t=>t.classList.remove("active-ticket"));
     el.classList.add("active-ticket");
 
     fetch(`/api/history/${id}`)
-    .then(res => res.json())
-    .then(data => {
-        ticketTitle.innerText = "Ticket: " + id;
+    .then(res=>res.json())
+    .then(data=>{
+        messages.innerHTML="";
+        ticketTitle.innerText="Ticket: "+id;
 
-        messages.innerHTML = "";
-        data.forEach(msg => addMessage(msg.message, msg.sender, msg.time));
+        data.forEach(m=>addMessage(m.message,m.sender,m.time));
     });
 }
 
-function addMessage(msg, sender, time="") {
-    let div = document.createElement("div");
-    div.className = "bubble " + sender;
-
-    if (msg.startsWith("[FILE]")) {
-        let file = msg.replace("[FILE] ", "");
-        let url = "/uploads/" + file;
-        let download = "/download/" + file;
-        let ext = file.split('.').pop().toLowerCase();
-
-        if (["jpg","png","jpeg","gif"].includes(ext)) {
-            div.innerHTML = `<img src="${url}" onclick="openModal('${url}','img')">
-                             <a class="download" href="${download}">⬇ Download</a>`;
-        }
-        else if (["mp4","webm"].includes(ext)) {
-            div.innerHTML = `<video onclick="openModal('${url}','video')" controls>
-                                <source src="${url}">
-                             </video>
-                             <a class="download" href="${download}">⬇ Download</a>`;
-        }
-        else {
-            div.innerHTML = `<a href="${url}" target="_blank">📎 ${file}</a>
-                             <a class="download" href="${download}">⬇ Download</a>`;
-        }
-    } else {
-        div.innerHTML = msg;
-    }
-
-    div.innerHTML += `<div class="time">${time}</div>`;
+function addMessage(msg,sender,time=""){
+    let div=document.createElement("div");
+    div.className="bubble "+sender;
+    div.innerHTML=msg+"<div class='time'>"+time+"</div>";
     messages.appendChild(div);
-    messages.scrollTop = messages.scrollHeight;
+    messages.scrollTop=messages.scrollHeight;
 }
 
-function sendReply() {
-    let msg = message.value;
-    if (!msg || !currentTicket) return;
+function sendReply(){
+    let msg=message.value;
+    if(!msg||!currentTicket)return;
 
-    socket.emit('send_message', {
-        ticket_id: currentTicket,
-        sender: 'admin',
-        message: msg
+    socket.emit('send_message',{
+        ticket_id:currentTicket,
+        sender:'admin',
+        message:msg
     });
 
-    addMessage(msg, 'admin');
-    message.value = "";
+    addMessage(msg,'admin');
+    message.value="";
 }
 
 function closeTicket(){
-    if(currentTicket) window.location.href = "/close/" + currentTicket;
+    fetch(`/close/${currentTicket}`).then(()=>alert("Closed"));
 }
 
 function openTicket(){
-    alert("Reopen logic can be added");
+    fetch(`/open/${currentTicket}`).then(()=>alert("Reopened"));
 }
 
-function openModal(url,type){
-    modal.style.display="flex";
-    modal.innerHTML = type==="img"
-        ? `<img src="${url}">`
-        : `<video controls autoplay><source src="${url}"></video>`;
-}
-
-function closeModal(){
-    modal.style.display="none";
-}
+socket.on('new_message',data=>{
+    if(data.ticket_id===currentTicket){
+        addMessage(data.message,data.sender,data.time);
+    }
+});
 </script>
 
 </body>
