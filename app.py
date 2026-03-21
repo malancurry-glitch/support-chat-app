@@ -13,11 +13,6 @@ app.secret_key = os.getenv("SECRET_KEY", "dev-secret")
 
 socketio = SocketIO(app, cors_allowed_origins="*")
 
-UPLOAD_FOLDER = 'uploads'
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-
 
 # ---------------- DATABASE ----------------
 def get_db():
@@ -30,8 +25,7 @@ def init_db():
     conn = get_db()
     c = conn.cursor()
 
-    c.execute('''
-    CREATE TABLE IF NOT EXISTS tickets (
+    c.execute('''CREATE TABLE IF NOT EXISTS tickets (
         id TEXT PRIMARY KEY,
         email TEXT,
         subject TEXT,
@@ -41,8 +35,7 @@ def init_db():
         created_at TEXT
     )''')
 
-    c.execute('''
-    CREATE TABLE IF NOT EXISTS messages (
+    c.execute('''CREATE TABLE IF NOT EXISTS messages (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         ticket_id TEXT,
         sender TEXT,
@@ -56,40 +49,29 @@ def init_db():
 init_db()
 
 
-# ---------------- TICKET ID ----------------
-def generate_ticket_id():
-    conn = get_db()
-    c = conn.cursor()
-
-    c.execute("SELECT id FROM tickets ORDER BY rowid DESC LIMIT 1")
-    last = c.fetchone()
-
-    if last:
-        try:
-            num = int(last["id"].replace("SUP-", ""))
-        except:
-            num = 1000
-    else:
-        num = 1000
-
-    conn.close()
-    return f"SUP-{num+1}"
-
-
 # ---------------- TELEGRAM ----------------
-def get_admins():
-    ids = os.getenv("TELEGRAM_CHAT_IDS", "")
-    return [i.strip() for i in ids.split(",") if i.strip()]
-
-
 def send_telegram(text):
     token = os.getenv("TELEGRAM_BOT_TOKEN")
+    chat_ids = os.getenv("TELEGRAM_CHAT_IDS")
 
-    for chat_id in get_admins():
-        requests.post(
-            f"https://api.telegram.org/bot{token}/sendMessage",
-            json={"chat_id": chat_id, "text": text}
-        )
+    print("TOKEN:", token)
+    print("CHAT_IDS:", chat_ids)
+
+    if not token or not chat_ids:
+        print("❌ TELEGRAM CONFIG MISSING")
+        return
+
+    for chat_id in chat_ids.split(","):
+        chat_id = chat_id.strip()
+
+        url = f"https://api.telegram.org/bot{token}/sendMessage"
+
+        res = requests.post(url, json={
+            "chat_id": chat_id,
+            "text": text
+        })
+
+        print("📤 TELEGRAM:", res.text)
 
 
 # ---------------- TELEGRAM WEBHOOK ----------------
@@ -97,13 +79,17 @@ def send_telegram(text):
 def telegram_webhook():
     try:
         data = request.get_json(force=True)
-        print("📩 TELEGRAM:", data)
+        print("📩 TELEGRAM RECEIVED:", data)
 
-        msg_obj = data.get("message")
-        if not msg_obj:
+        if not data:
             return "ok"
 
-        text = msg_obj.get("text", "").strip()
+        msg = data.get("message") or data.get("edited_message")
+        if not msg:
+            return "ok"
+
+        text = msg.get("text", "").strip()
+        print("TEXT:", text)
 
         # CLOSE
         if text.lower().startswith("close "):
@@ -115,7 +101,7 @@ def telegram_webhook():
             conn.commit()
             conn.close()
 
-            send_telegram(f"🔒 Ticket {ticket_id} closed")
+            send_telegram(f"🔒 Closed {ticket_id}")
             return "ok"
 
         # OPEN
@@ -128,12 +114,12 @@ def telegram_webhook():
             conn.commit()
             conn.close()
 
-            send_telegram(f"🟢 Ticket {ticket_id} reopened")
+            send_telegram(f"🟢 Opened {ticket_id}")
             return "ok"
 
         # REPLY
         if ":" not in text:
-            send_telegram("❌ Format:\nSUP-1001: message")
+            send_telegram("❌ Use format:\nSUP-1001: message")
             return "ok"
 
         ticket_id, message = text.split(":", 1)
@@ -145,8 +131,10 @@ def telegram_webhook():
         conn = get_db()
         c = conn.cursor()
 
-        c.execute("INSERT INTO messages VALUES (NULL, ?, ?, ?, ?)",
-                  (ticket_id, "admin", message, now))
+        c.execute(
+            "INSERT INTO messages VALUES (NULL, ?, ?, ?, ?)",
+            (ticket_id, "admin", message, now)
+        )
 
         conn.commit()
         conn.close()
@@ -166,10 +154,11 @@ def telegram_webhook():
     return "ok"
 
 
-# ---------------- MAIN ROUTE (FIXED) ----------------
+# ---------------- MAIN ----------------
 @app.route('/', methods=['GET','POST'])
 def create_ticket():
     if request.method == 'POST':
+        print("FORM:", request.form)
 
         email = request.form.get('email')
         subject = request.form.get('subject')
@@ -178,7 +167,7 @@ def create_ticket():
         if not email or not subject or not message:
             return "Missing fields", 400
 
-        ticket_id = generate_ticket_id()
+        ticket_id = "SUP-" + str(int(datetime.datetime.now().timestamp()))
         now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
         conn = get_db()
@@ -193,7 +182,7 @@ def create_ticket():
         conn.commit()
         conn.close()
 
-        send_telegram(f"🚨 New Ticket\n\n{ticket_id}\n{message}")
+        send_telegram(f"🚨 NEW TICKET\n{ticket_id}\n{message}")
 
         return redirect(url_for('view_ticket', ticket_id=ticket_id))
 
@@ -227,19 +216,6 @@ def admin_dashboard():
     return render_template('admin.html', tickets=tickets)
 
 
-# ---------------- API ----------------
-@app.route('/api/history/<ticket_id>')
-def history(ticket_id):
-    conn = get_db()
-    c = conn.cursor()
-
-    c.execute("SELECT sender,message,timestamp FROM messages WHERE ticket_id=?", (ticket_id,))
-    data = [{"sender": r["sender"], "message": r["message"], "time": r["timestamp"]} for r in c.fetchall()]
-
-    conn.close()
-    return jsonify(data)
-
-
 # ---------------- SOCKET ----------------
 @socketio.on('send_message')
 def handle_message(data):
@@ -256,12 +232,7 @@ def handle_message(data):
 
     send_telegram(f"💬 {data['ticket_id']} ({data['sender']}): {data['message']}")
 
-    emit('new_message', {
-        "ticket_id": data['ticket_id'],
-        "message": data['message'],
-        "sender": data['sender'],
-        "time": now
-    }, broadcast=True)
+    emit('new_message', data, broadcast=True)
 
 
 # ---------------- RUN ----------------
