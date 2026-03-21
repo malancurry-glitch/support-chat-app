@@ -1,31 +1,45 @@
-from flask import Flask, render_template, request, redirect, url_for, jsonify, send_from_directory
+from flask import Flask, render_template, request, redirect, url_for, jsonify, send_from_directory, abort
 from flask_socketio import SocketIO, emit
 import sqlite3
 import datetime
 import os
 import requests
+from werkzeug.utils import secure_filename
 from dotenv import load_dotenv
 
 load_dotenv()
 
-app = Flask(__name__)
+app = Flask(__name__, template_folder="templates")
 app.secret_key = os.getenv("SECRET_KEY", "dev-secret")
 
 socketio = SocketIO(app, cors_allowed_origins="*")
 
+UPLOAD_FOLDER = 'uploads'
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# ---------------- DATABASE ----------------
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+
+ALLOWED_EXTENSIONS = {'png','jpg','jpeg','gif','webp','mp4','webm','pdf','txt'}
+
+
+# ---------------- HELPERS ----------------
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.',1)[1].lower() in ALLOWED_EXTENSIONS
+
+
 def get_db():
     conn = sqlite3.connect('database.db')
     conn.row_factory = sqlite3.Row
     return conn
 
 
+# ---------------- INIT DB ----------------
 def init_db():
     conn = get_db()
     c = conn.cursor()
 
-    c.execute('''CREATE TABLE IF NOT EXISTS tickets (
+    c.execute('''
+    CREATE TABLE IF NOT EXISTS tickets (
         id TEXT PRIMARY KEY,
         email TEXT,
         subject TEXT,
@@ -35,7 +49,8 @@ def init_db():
         created_at TEXT
     )''')
 
-    c.execute('''CREATE TABLE IF NOT EXISTS messages (
+    c.execute('''
+    CREATE TABLE IF NOT EXISTS messages (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         ticket_id TEXT,
         sender TEXT,
@@ -49,49 +64,75 @@ def init_db():
 init_db()
 
 
-# ---------------- TELEGRAM ----------------
+# ---------------- TICKET ID ----------------
+def generate_ticket_id():
+    conn = get_db()
+    c = conn.cursor()
+
+    c.execute("SELECT id FROM tickets ORDER BY rowid DESC LIMIT 1")
+    last = c.fetchone()
+
+    if last and last["id"]:
+        try:
+            num = int(last["id"].replace("SUP-", ""))
+        except:
+            num = 1000
+    else:
+        num = 1000
+
+    conn.close()
+    return f"SUP-{num+1}"
+
+
+# ---------------- TELEGRAM SEND ----------------
 def send_telegram(text):
-    token = os.getenv("TELEGRAM_BOT_TOKEN")
-    chat_ids = os.getenv("TELEGRAM_CHAT_IDS")
+    try:
+        token = os.getenv("TELEGRAM_BOT_TOKEN")
+        chat_id = os.getenv("TELEGRAM_CHAT_ID")
 
-    print("TOKEN:", token)
-    print("CHAT_IDS:", chat_ids)
-
-    if not token or not chat_ids:
-        print("❌ TELEGRAM CONFIG MISSING")
-        return
-
-    for chat_id in chat_ids.split(","):
-        chat_id = chat_id.strip()
+        if not token or not chat_id:
+            print("⚠️ Telegram not configured")
+            return
 
         url = f"https://api.telegram.org/bot{token}/sendMessage"
 
-        res = requests.post(url, json={
+        requests.post(url, json={
             "chat_id": chat_id,
             "text": text
         })
 
-        print("📤 TELEGRAM:", res.text)
+    except Exception as e:
+        print("❌ Telegram send error:", e)
 
 
-# ---------------- TELEGRAM WEBHOOK ----------------
+
+
+
+# ---------------- TELEGRAM RECEIVE ----------------
 @app.route('/telegram', methods=['POST'])
 def telegram_webhook():
     try:
         data = request.get_json(force=True)
         print("📩 TELEGRAM RECEIVED:", data)
 
-        if not data:
+        # 🔥 handle ALL message types
+        msg_obj = (
+            data.get("message")
+            or data.get("edited_message")
+            or data.get("channel_post")
+        )
+
+        if not msg_obj:
+            print("❌ No message object")
             return "ok"
 
-        msg = data.get("message") or data.get("edited_message")
-        if not msg:
-            return "ok"
-
-        text = msg.get("text", "").strip()
+        text = msg_obj.get("text", "").strip()
         print("TEXT:", text)
 
-        # CLOSE
+        if not text:
+            return "ok"
+
+        # 🔴 CLOSE COMMAND
         if text.lower().startswith("close "):
             ticket_id = text.replace("close ", "").strip()
 
@@ -101,10 +142,10 @@ def telegram_webhook():
             conn.commit()
             conn.close()
 
-            send_telegram(f"🔒 Closed {ticket_id}")
+            send_telegram(f"🔒 Ticket {ticket_id} closed")
             return "ok"
 
-        # OPEN
+        # 🟢 OPEN COMMAND
         if text.lower().startswith("open "):
             ticket_id = text.replace("open ", "").strip()
 
@@ -114,17 +155,17 @@ def telegram_webhook():
             conn.commit()
             conn.close()
 
-            send_telegram(f"🟢 Opened {ticket_id}")
+            send_telegram(f"🟢 Ticket {ticket_id} reopened")
             return "ok"
 
-        # REPLY
+        # 💬 REPLY FORMAT
         if ":" not in text:
-            send_telegram("❌ Use format:\nSUP-1001: message")
+            send_telegram("❌ Use format:\nSUP-1001: your message")
             return "ok"
 
-        ticket_id, message = text.split(":", 1)
+        ticket_id, msg = text.split(":", 1)
         ticket_id = ticket_id.strip()
-        message = message.strip()
+        msg = msg.strip()
 
         now = datetime.datetime.now().strftime('%H:%M')
 
@@ -133,15 +174,16 @@ def telegram_webhook():
 
         c.execute(
             "INSERT INTO messages VALUES (NULL, ?, ?, ?, ?)",
-            (ticket_id, "admin", message, now)
+            (ticket_id, "admin", msg, now)
         )
 
         conn.commit()
         conn.close()
 
+        # 🔥 REAL-TIME UPDATE
         socketio.emit('new_message', {
             "ticket_id": ticket_id,
-            "message": message,
+            "message": msg,
             "sender": "admin",
             "time": now
         })
@@ -154,20 +196,27 @@ def telegram_webhook():
     return "ok"
 
 
-# ---------------- MAIN ----------------
+# ---------------- FILE ROUTES ----------------
+@app.route('/uploads/<filename>')
+def uploaded_file(filename):
+    return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
+
+
+@app.route('/download/<filename>')
+def download_file(filename):
+    return send_from_directory(app.config['UPLOAD_FOLDER'], filename, as_attachment=True)
+
+
+# ---------------- CREATE TICKET ----------------
 @app.route('/', methods=['GET','POST'])
 def create_ticket():
     if request.method == 'POST':
-        print("FORM:", request.form)
 
         email = request.form.get('email')
         subject = request.form.get('subject')
         message = request.form.get('message')
 
-        if not email or not subject or not message:
-            return "Missing fields", 400
-
-        ticket_id = "SUP-" + str(int(datetime.datetime.now().timestamp()))
+        ticket_id = generate_ticket_id()
         now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
         conn = get_db()
@@ -182,14 +231,21 @@ def create_ticket():
         conn.commit()
         conn.close()
 
-        send_telegram(f"🚨 NEW TICKET\n{ticket_id}\n{message}")
+        send_telegram(f"""
+🚨 New Ticket
+
+ID: {ticket_id}
+User: {email}
+Subject: {subject}
+
+{message}
+""")
 
         return redirect(url_for('view_ticket', ticket_id=ticket_id))
 
     return render_template('create_ticket.html')
 
 
-# ---------------- VIEW ----------------
 @app.route('/ticket/<ticket_id>')
 def view_ticket(ticket_id):
     conn = get_db()
@@ -219,6 +275,7 @@ def admin_dashboard():
 # ---------------- SOCKET ----------------
 @socketio.on('send_message')
 def handle_message(data):
+
     now = datetime.datetime.now().strftime('%H:%M')
 
     conn = get_db()
@@ -230,9 +287,21 @@ def handle_message(data):
     conn.commit()
     conn.close()
 
-    send_telegram(f"💬 {data['ticket_id']} ({data['sender']}): {data['message']}")
+    send_telegram(f"""
+💬 Message
 
-    emit('new_message', data, broadcast=True)
+Ticket: {data['ticket_id']}
+From: {data['sender']}
+
+{data['message']}
+""")
+
+    emit('new_message', {
+        "ticket_id": data['ticket_id'],
+        "message": data['message'],
+        "sender": data['sender'],
+        "time": now
+    }, broadcast=True)
 
 
 # ---------------- RUN ----------------
