@@ -4,7 +4,6 @@ import sqlite3
 import datetime
 import os
 import requests
-from werkzeug.utils import secure_filename
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -16,28 +15,17 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 
 UPLOAD_FOLDER = 'uploads'
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
-ALLOWED_EXTENSIONS = {'png','jpg','jpeg','gif','webp','mp4','webm','pdf','txt'}
 
-
-# ---------------- HELPERS ----------------
-def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.',1)[1].lower() in ALLOWED_EXTENSIONS
-
-
+# ---------------- DATABASE ----------------
 def get_db():
     conn = sqlite3.connect('database.db')
     conn.row_factory = sqlite3.Row
     return conn
 
 
-def get_admins():
-    ids = os.getenv("TELEGRAM_CHAT_IDS", "")
-    return [i.strip() for i in ids.split(",") if i.strip()]
-
-
-# ---------------- INIT DB ----------------
 def init_db():
     conn = get_db()
     c = conn.cursor()
@@ -89,6 +77,11 @@ def generate_ticket_id():
 
 
 # ---------------- TELEGRAM ----------------
+def get_admins():
+    ids = os.getenv("TELEGRAM_CHAT_IDS", "")
+    return [i.strip() for i in ids.split(",") if i.strip()]
+
+
 def send_telegram(text):
     token = os.getenv("TELEGRAM_BOT_TOKEN")
 
@@ -112,7 +105,7 @@ def telegram_webhook():
 
         text = msg_obj.get("text", "").strip()
 
-        # 🔴 CLOSE
+        # CLOSE
         if text.lower().startswith("close "):
             ticket_id = text.replace("close ", "").strip()
 
@@ -125,7 +118,7 @@ def telegram_webhook():
             send_telegram(f"🔒 Ticket {ticket_id} closed")
             return "ok"
 
-        # 🟢 OPEN
+        # OPEN
         if text.lower().startswith("open "):
             ticket_id = text.replace("open ", "").strip()
 
@@ -138,7 +131,7 @@ def telegram_webhook():
             send_telegram(f"🟢 Ticket {ticket_id} reopened")
             return "ok"
 
-        # 💬 REPLY
+        # REPLY
         if ":" not in text:
             send_telegram("❌ Format:\nSUP-1001: message")
             return "ok"
@@ -173,38 +166,41 @@ def telegram_webhook():
     return "ok"
 
 
-# ---------------- ROUTES ----------------
-@app.route('/')
-def home():
+# ---------------- MAIN ROUTE (FIXED) ----------------
+@app.route('/', methods=['GET','POST'])
+def create_ticket():
+    if request.method == 'POST':
+
+        email = request.form.get('email')
+        subject = request.form.get('subject')
+        message = request.form.get('message')
+
+        if not email or not subject or not message:
+            return "Missing fields", 400
+
+        ticket_id = generate_ticket_id()
+        now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+        conn = get_db()
+        c = conn.cursor()
+
+        c.execute("INSERT INTO tickets VALUES (?, ?, ?, ?, ?, ?, ?)",
+                  (ticket_id, email, subject, "Medium", "open", None, now))
+
+        c.execute("INSERT INTO messages VALUES (NULL, ?, ?, ?, ?)",
+                  (ticket_id, "user", message, now))
+
+        conn.commit()
+        conn.close()
+
+        send_telegram(f"🚨 New Ticket\n\n{ticket_id}\n{message}")
+
+        return redirect(url_for('view_ticket', ticket_id=ticket_id))
+
     return render_template('create_ticket.html')
 
 
-@app.route('/create', methods=['POST'])
-def create_ticket():
-    email = request.form.get('email')
-    subject = request.form.get('subject')
-    message = request.form.get('message')
-
-    ticket_id = generate_ticket_id()
-    now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-
-    conn = get_db()
-    c = conn.cursor()
-
-    c.execute("INSERT INTO tickets VALUES (?, ?, ?, ?, ?, ?, ?)",
-              (ticket_id, email, subject, "Medium", "open", None, now))
-
-    c.execute("INSERT INTO messages VALUES (NULL, ?, ?, ?, ?)",
-              (ticket_id, "user", message, now))
-
-    conn.commit()
-    conn.close()
-
-    send_telegram(f"🚨 New Ticket\n\n{ticket_id}\n{message}")
-
-    return redirect(url_for('view_ticket', ticket_id=ticket_id))
-
-
+# ---------------- VIEW ----------------
 @app.route('/ticket/<ticket_id>')
 def view_ticket(ticket_id):
     conn = get_db()
@@ -231,26 +227,7 @@ def admin_dashboard():
     return render_template('admin.html', tickets=tickets)
 
 
-@app.route('/close/<ticket_id>')
-def close_ticket(ticket_id):
-    conn = get_db()
-    c = conn.cursor()
-    c.execute("UPDATE tickets SET status='closed' WHERE id=?", (ticket_id,))
-    conn.commit()
-    conn.close()
-    return "ok"
-
-
-@app.route('/open/<ticket_id>')
-def open_ticket(ticket_id):
-    conn = get_db()
-    c = conn.cursor()
-    c.execute("UPDATE tickets SET status='open' WHERE id=?", (ticket_id,))
-    conn.commit()
-    conn.close()
-    return "ok"
-
-
+# ---------------- API ----------------
 @app.route('/api/history/<ticket_id>')
 def history(ticket_id):
     conn = get_db()
