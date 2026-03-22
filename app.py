@@ -423,8 +423,6 @@ def telegram_webhook():
             "time": now
         }, broadcast=True)
 
-        send_telegram(f"💬 Sent to #{ticket_id}")
-
     except Exception as e:
         print("❌ TELEGRAM ERROR:", e)
 
