@@ -254,7 +254,7 @@ def telegram_webhook():
 
             return "ok"
 
-        # ---------------- MESSAGE ----------------
+        # ---------------- MESSAGE OBJECT ----------------
         msg_obj = (
             data.get("message")
             or data.get("edited_message")
@@ -269,6 +269,9 @@ def telegram_webhook():
             file_id = msg_obj["photo"][-1]["file_id"]
             filename = download_telegram_file(file_id)
 
+            if not filename:
+                return "ok"
+
             caption = msg_obj.get("caption", "")
             match = re.search(r"#?(\d+)", caption)
 
@@ -282,10 +285,19 @@ def telegram_webhook():
 
             conn = get_db()
             c = conn.cursor()
+
+            # CHECK TICKET EXISTS
+            c.execute("SELECT id FROM tickets WHERE id=?", (ticket_id,))
+            if not c.fetchone():
+                conn.close()
+                send_telegram(f"❌ Ticket #{ticket_id} not found")
+                return "ok"
+
             c.execute(
                 "INSERT INTO messages VALUES (NULL, ?, ?, ?, ?)",
                 (ticket_id, "admin", f"[FILE] {filename}", now)
             )
+
             conn.commit()
             conn.close()
 
@@ -296,6 +308,7 @@ def telegram_webhook():
                 "time": now
             }, broadcast=True)
 
+            send_telegram(f"📷 Delivered to #{ticket_id}")
             return "ok"
 
         # ---------------- VIDEO ----------------
@@ -303,6 +316,9 @@ def telegram_webhook():
             file_id = msg_obj["video"]["file_id"]
             filename = download_telegram_file(file_id)
 
+            if not filename:
+                return "ok"
+
             caption = msg_obj.get("caption", "")
             match = re.search(r"#?(\d+)", caption)
 
@@ -316,10 +332,19 @@ def telegram_webhook():
 
             conn = get_db()
             c = conn.cursor()
+
+            # CHECK TICKET EXISTS
+            c.execute("SELECT id FROM tickets WHERE id=?", (ticket_id,))
+            if not c.fetchone():
+                conn.close()
+                send_telegram(f"❌ Ticket #{ticket_id} not found")
+                return "ok"
+
             c.execute(
                 "INSERT INTO messages VALUES (NULL, ?, ?, ?, ?)",
                 (ticket_id, "admin", f"[FILE] {filename}", now)
             )
+
             conn.commit()
             conn.close()
 
@@ -330,6 +355,7 @@ def telegram_webhook():
                 "time": now
             }, broadcast=True)
 
+            send_telegram(f"🎥 Delivered to #{ticket_id}")
             return "ok"
 
         # ---------------- TEXT ----------------
@@ -380,7 +406,7 @@ def telegram_webhook():
         conn = get_db()
         c = conn.cursor()
 
-        # CHECK EXISTENCE
+        # CHECK TICKET EXISTS
         c.execute("SELECT id FROM tickets WHERE id=?", (ticket_id,))
         if not c.fetchone():
             conn.close()
@@ -401,6 +427,9 @@ def telegram_webhook():
             "sender": "admin",
             "time": now
         }, broadcast=True)
+
+        # ✅ CLEAN DELIVERY FEEDBACK
+        send_telegram(f"💬 Delivered to #{ticket_id}")
 
         return "ok"
 
