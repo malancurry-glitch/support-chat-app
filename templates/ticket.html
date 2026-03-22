@@ -14,30 +14,51 @@ body {
 /* Layout */
 .container {
     max-width:800px;
-    margin:30px auto;
+    margin:20px auto;
     background:white;
     border-radius:16px;
     display:flex;
     flex-direction:column;
-    height:88vh;
+    height:90vh;
     box-shadow:0 15px 50px rgba(0,0,0,0.12);
     overflow:hidden;
 }
 
 /* Header */
 .header {
-    padding:16px;
+    padding:12px;
     background:#2563eb;
     color:white;
     display:flex;
     justify-content:space-between;
+    align-items:center;
 }
 
-.status {
-    font-size:12px;
-    background:#22c55e;
+.header-left {
+    display:flex;
+    align-items:center;
+    gap:10px;
+}
+
+.back {
+    cursor:pointer;
+    font-size:14px;
+    background:white;
+    color:#2563eb;
     padding:4px 8px;
-    border-radius:20px;
+    border-radius:6px;
+}
+
+.actions {
+    display:flex;
+    gap:6px;
+}
+
+.actions button {
+    background:white;
+    color:#2563eb;
+    border-radius:6px;
+    padding:5px 8px;
 }
 
 /* Messages */
@@ -54,7 +75,7 @@ body {
 /* Bubble */
 .bubble {
     max-width:70%;
-    padding:12px 14px;
+    padding:12px;
     border-radius:14px;
     font-size:14px;
 }
@@ -67,49 +88,32 @@ body {
 
 .admin {
     background:#e5e7eb;
-    color:#111827;
     align-self:flex-start;
 }
 
-/* Media */
-.bubble img, .bubble video {
-    max-width:240px;
-    border-radius:10px;
-    margin-top:6px;
-}
-
-/* Time */
 .time {
     font-size:10px;
     opacity:0.6;
     margin-top:4px;
 }
 
-/* Download */
-.download {
-    font-size:11px;
-    display:block;
-    margin-top:4px;
-    color:#2563eb;
-}
-
 /* Input */
 .input-box {
     display:flex;
-    padding:12px;
+    padding:10px;
     border-top:1px solid #eee;
 }
 
 input {
     flex:1;
-    padding:12px;
+    padding:10px;
     border-radius:20px;
     border:1px solid #ddd;
 }
 
 button {
-    margin-left:8px;
-    padding:12px;
+    margin-left:6px;
+    padding:10px;
     border:none;
     border-radius:50%;
     background:#2563eb;
@@ -123,29 +127,26 @@ button {
 
 <div class="container">
 
+<!-- HEADER -->
 <div class="header">
-    <div><b>Ticket #{{ticket_id}}</b></div>
-    <div class="status">● Active</div>
+
+<div class="header-left">
+    <div class="back" onclick="goBack()">← Back</div>
+    <div><b id="ticketLabel">Ticket #{{ticket_id}}</b></div>
 </div>
 
+<div class="actions">
+    <button onclick="copyTicket()">Copy</button>
+    <button onclick="reloadChat()">↻</button>
+</div>
+
+</div>
+
+<!-- MESSAGES -->
 <div id="messages" class="messages">
 {% for msg in messages %}
 <div class="bubble {{msg[0]}}">
-    {% if "[FILE]" in msg[1] %}
-        {% set file = msg[1].replace("[FILE] ", "") %}
-        {% if file.endswith(('.jpg','.jpeg','.png','.gif','.webp')) %}
-            <img src="/uploads/{{file}}">
-        {% elif file.endswith(('.mp4','.webm','.ogg')) %}
-            <video controls>
-                <source src="/uploads/{{file}}">
-            </video>
-        {% else %}
-            <a href="/uploads/{{file}}" target="_blank">📎 {{file}}</a>
-        {% endif %}
-        <a class="download" href="/download/{{file}}">⬇ Download</a>
-    {% else %}
-        {{msg[1]}}
-    {% endif %}
+    {{msg[1]}}
     <div class="time">{{msg[2]}}</div>
 </div>
 {% endfor %}
@@ -153,8 +154,9 @@ button {
 
 <div id="typing" style="padding-left:10px;font-size:12px;"></div>
 
+<!-- INPUT -->
 <div class="input-box">
-    <input id="messageInput" placeholder="Type a message..." onkeypress="handleKey(event)">
+    <input id="messageInput" placeholder="Type a message...">
     <input type="file" id="fileInput" hidden>
     <button onclick="upload()">📎</button>
     <button onclick="sendMessage()">➤</button>
@@ -171,42 +173,43 @@ const input = document.getElementById("messageInput");
 const fileInput = document.getElementById("fileInput");
 const typingEl = document.getElementById("typing");
 
-// Scroll
+// BACK BUTTON
+function goBack(){
+    window.location.href = "/my-tickets";
+}
+
+// COPY TICKET ID
+function copyTicket(){
+    navigator.clipboard.writeText(ticket_id);
+    alert("Copied!");
+}
+
+// RELOAD CHAT
+function reloadChat(){
+    fetch(`/api/history/${ticket_id}`)
+    .then(res=>res.json())
+    .then(data=>{
+        box.innerHTML="";
+        data.forEach(m=>addMessage(m.message,m.sender,m.time));
+    });
+}
+
+// SCROLL
 function scrollDown(){
     box.scrollTop = box.scrollHeight;
 }
 scrollDown();
 
-// Add message
+// ADD MESSAGE
 function addMessage(msg, sender, time=""){
     let div = document.createElement("div");
     div.className = "bubble " + sender;
-
-    if(msg.startsWith("[FILE]")){
-        let file = msg.replace("[FILE] ","");
-        let url = "/uploads/" + file;
-        let download = "/download/" + file;
-        let ext = file.split('.').pop().toLowerCase();
-
-        if(["jpg","jpeg","png","gif","webp"].includes(ext)){
-            div.innerHTML = `<img src="${url}"><a class="download" href="${download}">⬇ Download</a>`;
-        }
-        else if(["mp4","webm","ogg"].includes(ext)){
-            div.innerHTML = `<video controls><source src="${url}"></video><a class="download" href="${download}">⬇ Download</a>`;
-        }
-        else{
-            div.innerHTML = `<a href="${url}" target="_blank">📎 ${file}</a><a class="download" href="${download}">⬇ Download</a>`;
-        }
-    } else {
-        div.innerHTML = msg;
-    }
-
-    div.innerHTML += `<div class="time">${time}</div>`;
+    div.innerHTML = msg + `<div class="time">${time}</div>`;
     box.appendChild(div);
     scrollDown();
 }
 
-// Send message
+// SEND
 function sendMessage(){
     let msg = input.value.trim();
     if(!msg) return;
@@ -221,7 +224,7 @@ function sendMessage(){
     input.value="";
 }
 
-// Upload file
+// FILE
 function upload(){
     fileInput.click();
 }
@@ -236,32 +239,35 @@ fileInput.onchange = ()=>{
     fetch(`/upload/${ticket_id}`,{
         method:"POST",
         body:form
-    }).then(()=> {
-        addMessage("[FILE] "+file.name,"user",new Date().toLocaleTimeString());
+    }).then(()=>{
+        addMessage("[FILE] "+file.name,"user");
     });
 };
 
-// Receive
+// RECEIVE
 socket.on('new_message', data=>{
     if(data.ticket_id===ticket_id){
         addMessage(data.message,data.sender,data.time);
     }
 });
 
-// Typing
+// TYPING
 input.addEventListener("input",()=>{
     socket.emit('typing',{});
 });
 
 socket.on('typing',()=>{
-    typingEl.innerText="Support is typing...";
+    typingEl.innerText="Support typing...";
     setTimeout(()=>typingEl.innerText="",1500);
 });
 
-// Enter
-function handleKey(e){
-    if(e.key==="Enter") sendMessage();
-}
+// ENTER SEND
+input.addEventListener("keypress", e=>{
+    if(e.key==="Enter"){
+        e.preventDefault();
+        sendMessage();
+    }
+});
 </script>
 
 </body>
