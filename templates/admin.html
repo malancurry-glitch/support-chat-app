@@ -60,16 +60,6 @@ body {
 .ticket:hover { background:#374151; }
 .active-ticket { background:#2563eb; }
 
-.status-badge {
-    font-size:10px;
-    padding:2px 6px;
-    border-radius:4px;
-    margin-left:6px;
-}
-
-.open-badge { background:#22c55e; }
-.closed-badge { background:#ef4444; }
-
 /* MAIN */
 .main {
     flex:1;
@@ -83,26 +73,12 @@ body {
     border-bottom:1px solid #ddd;
     display:flex;
     justify-content:space-between;
-    align-items:center;
 }
 
-button {
-    padding:6px 10px;
-    border:none;
-    border-radius:6px;
-    cursor:pointer;
-}
-
-.close { background:#ef4444; color:white; }
-.open { background:#22c55e; color:white; }
-
-/* Messages */
 .messages {
     flex:1;
     padding:20px;
     overflow-y:auto;
-    display:flex;
-    flex-direction:column;
 }
 
 .bubble {
@@ -112,7 +88,7 @@ button {
     border-radius:10px;
 }
 
-.user { background:#e0f2fe; align-self:flex-start; }
+.user { background:#e0f2fe; }
 .admin { background:#dcfce7; align-self:flex-end; }
 
 .time {
@@ -129,31 +105,12 @@ button {
 input {
     flex:1;
     padding:10px;
-    border-radius:8px;
-    border:1px solid #ccc;
 }
 
 .send {
     margin-left:10px;
     background:#2563eb;
     color:white;
-}
-
-/* MODAL */
-.modal {
-    position:fixed;
-    top:0;
-    left:0;
-    width:100%;
-    height:100%;
-    background:rgba(0,0,0,0.8);
-    display:none;
-    justify-content:center;
-    align-items:center;
-}
-
-.modal img, .modal video {
-    max-width:80%;
 }
 </style>
 </head>
@@ -163,103 +120,158 @@ input {
 <div class="nav">💬</div>
 
 <div class="sidebar">
+
 <div class="search">
     <input id="search" placeholder="Search..." oninput="filterTickets()">
 </div>
 
 <div class="filters">
-    <div class="filter active-filter" onclick="setFilter('all')">All</div>
+    <div class="filter" onclick="setFilter('all')">All</div>
     <div class="filter" onclick="setFilter('open')">Open</div>
     <div class="filter" onclick="setFilter('closed')">Closed</div>
 </div>
 
 <div id="ticketList" class="ticket-list">
 {% for t in tickets %}
-<div class="ticket" data-id="{{t[0]}}" data-status="{{t[4]}}" onclick="loadTicket('{{t[0]}}', this)">
-    <b>{{t[2]}}</b>
-    <span class="status-badge {{ 'open-badge' if t[4]=='open' else 'closed-badge' }}">
-        {{t[4]}}
-    </span>
-    <br>
+<div class="ticket" data-id="{{t[0]}}" data-status="{{t[4]}}">
+    <b>{{t[2]}}</b><br>
     <small>{{t[1]}}</small>
 </div>
 {% endfor %}
 </div>
+
 </div>
 
 <div class="main">
+
 <div class="header">
     <div id="ticketTitle">Select a ticket</div>
-    <div>
-        <button class="open" onclick="openTicket()">Reopen</button>
-        <button class="close" onclick="closeTicket()">Close</button>
-    </div>
 </div>
 
 <div id="messages" class="messages"></div>
 
 <div class="input-box">
-    <input id="message" placeholder="Reply..." onkeypress="handleKey(event)">
+    <input id="messageInput" placeholder="Reply..." onkeypress="handleKey(event)">
     <button class="send" onclick="sendReply()">Send</button>
 </div>
+
 </div>
 
-<div id="modal" class="modal" onclick="closeModal()"></div>
-
 <script>
-var socket = io();
+
+// SAFE SOCKET
+let socket;
+try {
+    socket = io();
+} catch(e){
+    console.log("Socket failed:", e);
+}
+
 let currentTicket = null;
 
+const messagesEl = document.getElementById("messages");
+const titleEl = document.getElementById("ticketTitle");
+const inputEl = document.getElementById("messageInput");
+
+// 🔥 FIX: attach click AFTER render
+document.querySelectorAll(".ticket").forEach(el=>{
+    el.addEventListener("click", ()=>{
+        loadTicket(el.dataset.id, el);
+    });
+});
+
+// LOAD TICKET
 function loadTicket(id, el){
     currentTicket = id;
+
     document.querySelectorAll(".ticket").forEach(t=>t.classList.remove("active-ticket"));
     el.classList.add("active-ticket");
 
     fetch(`/api/history/${id}`)
-    .then(res=>res.json())
+    .then(res=>{
+        if(!res.ok){
+            throw new Error("API failed");
+        }
+        return res.json();
+    })
     .then(data=>{
-        messages.innerHTML="";
-        ticketTitle.innerText="Ticket: "+id;
+        messagesEl.innerHTML="";
+        titleEl.innerText="Ticket: "+id;
+
+        if(!Array.isArray(data)){
+            console.error("Bad data", data);
+            return;
+        }
 
         data.forEach(m=>addMessage(m.message,m.sender,m.time));
+    })
+    .catch(err=>{
+        console.error("LOAD ERROR:", err);
+        alert("Failed to load ticket (check backend)");
     });
 }
 
+// ADD MESSAGE
 function addMessage(msg,sender,time=""){
     let div=document.createElement("div");
     div.className="bubble "+sender;
     div.innerHTML=msg+"<div class='time'>"+time+"</div>";
-    messages.appendChild(div);
-    messages.scrollTop=messages.scrollHeight;
+    messagesEl.appendChild(div);
 }
 
+// SEND MESSAGE
 function sendReply(){
-    let msg=message.value;
-    if(!msg||!currentTicket)return;
+    let msg=inputEl.value.trim();
+    if(!msg || !currentTicket){
+        alert("Select ticket first");
+        return;
+    }
 
-    socket.emit('send_message',{
-        ticket_id:currentTicket,
-        sender:'admin',
-        message:msg
-    });
+    if(socket){
+        socket.emit('send_message',{
+            ticket_id:currentTicket,
+            sender:'admin',
+            message:msg
+        });
+    }
 
     addMessage(msg,'admin');
-    message.value="";
+    inputEl.value="";
 }
 
-function closeTicket(){
-    fetch(`/close/${currentTicket}`).then(()=>alert("Closed"));
+// SEARCH
+function filterTickets(){
+    let q=document.getElementById("search").value.toLowerCase();
+
+    document.querySelectorAll(".ticket").forEach(t=>{
+        t.style.display = t.innerText.toLowerCase().includes(q) ? "block":"none";
+    });
 }
 
-function openTicket(){
-    fetch(`/open/${currentTicket}`).then(()=>alert("Reopened"));
+// FILTER
+function setFilter(status){
+    document.querySelectorAll(".ticket").forEach(t=>{
+        if(status==="all"){
+            t.style.display="block";
+        } else {
+            t.style.display = t.dataset.status===status ? "block":"none";
+        }
+    });
 }
 
-socket.on('new_message',data=>{
-    if(data.ticket_id===currentTicket){
-        addMessage(data.message,data.sender,data.time);
-    }
-});
+// REALTIME
+if(socket){
+    socket.on('new_message',data=>{
+        if(data.ticket_id===currentTicket){
+            addMessage(data.message,data.sender,data.time);
+        }
+    });
+}
+
+// ENTER
+function handleKey(e){
+    if(e.key==="Enter") sendReply();
+}
 </script>
 
 </body>

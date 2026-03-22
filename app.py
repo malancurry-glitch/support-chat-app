@@ -475,6 +475,47 @@ def upload_file(ticket_id):
 
 
 
+@app.route('/close/<ticket_id>')
+def close_ticket(ticket_id):
+    conn = get_db()
+    c = conn.cursor()
+
+    c.execute("UPDATE tickets SET status='closed' WHERE id=?", (ticket_id,))
+    conn.commit()
+    conn.close()
+
+    return "ok"
+
+
+@app.route('/open/<ticket_id>')
+def open_ticket(ticket_id):
+    conn = get_db()
+    c = conn.cursor()
+
+    c.execute("UPDATE tickets SET status='open' WHERE id=?", (ticket_id,))
+    conn.commit()
+    conn.close()
+
+    return "ok"
+
+
+
+
+@app.route('/api/history/<ticket_id>')
+def history(ticket_id):
+    conn = get_db()
+    c = conn.cursor()
+
+    c.execute("SELECT sender, message, timestamp FROM messages WHERE ticket_id=?", (ticket_id,))
+    data = [
+        {"sender": r[0], "message": r[1], "time": r[2]}
+        for r in c.fetchall()
+    ]
+
+    conn.close()
+    return jsonify(data)
+
+
 @app.route('/admin')
 def admin_dashboard():
     conn = get_db()
