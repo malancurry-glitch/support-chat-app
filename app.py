@@ -98,8 +98,10 @@ def send_telegram(text):
             f"https://api.telegram.org/bot{token}/sendMessage",
             json={
                 "chat_id": chat_id,
-                "text": text
-            }
+                "text": text,
+                "parse_mode": "HTML"
+            },
+            timeout=10
         )
 
         print("📤 TEXT SENT:", res.status_code)
@@ -133,7 +135,8 @@ def send_telegram_with_buttons(text, ticket_id):
                 "chat_id": chat_id,
                 "text": text,
                 "reply_markup": buttons
-            }
+            },
+            timeout=10
         )
 
         print("📤 BUTTON MESSAGE SENT:", res.status_code)
@@ -149,7 +152,8 @@ def download_telegram_file(file_id):
 
         file_info = requests.get(
             f"https://api.telegram.org/bot{token}/getFile",
-            params={"file_id": file_id}
+            params={"file_id": file_id},
+            timeout=10
         ).json()
 
         if not file_info.get("ok"):
@@ -159,7 +163,7 @@ def download_telegram_file(file_id):
         file_path = file_info["result"]["file_path"]
 
         file_url = f"https://api.telegram.org/file/bot{token}/{file_path}"
-        file_data = requests.get(file_url).content
+        file_data = requests.get(file_url, timeout=10).content
 
         filename = file_path.split("/")[-1]
         save_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
@@ -168,7 +172,6 @@ def download_telegram_file(file_id):
             f.write(file_data)
 
         print("📥 FILE DOWNLOADED:", filename)
-
         return filename
 
     except Exception as e:
@@ -188,15 +191,15 @@ def send_telegram_file(file_path, ticket_id, name="User", email=""):
 
         ext = file_path.split(".")[-1].lower()
 
-        # 🔥 IMPROVED CAPTION (includes NAME)
-        caption = f"""📎 File from ticket
+        # ✅ CLEAN CAPTION (PRODUCTION)
+        caption = f"""📎 <b>New File</b>
 
-#{ticket_id}
-Name: {name}
-Email: {email}
+<b>Ticket:</b> #{ticket_id}
+<b>Name:</b> {name}
+<b>Email:</b> {email}
 """
 
-        # 🔥 DETECT FILE TYPE
+        # FILE TYPE
         if ext in ["jpg","jpeg","png","gif","webp"]:
             url = f"https://api.telegram.org/bot{token}/sendPhoto"
             key = "photo"
@@ -212,9 +215,11 @@ Email: {email}
                 url,
                 data={
                     "chat_id": chat_id,
-                    "caption": caption
+                    "caption": caption,
+                    "parse_mode": "HTML"
                 },
-                files={key: f}
+                files={key: f},
+                timeout=15
             )
 
         print("📤 FILE SENT:", res.status_code)
