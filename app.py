@@ -398,6 +398,7 @@ def create_ticket():
         email = request.form.get('email')
         subject = request.form.get('subject')
         message = request.form.get('message')
+        file = request.files.get('file')   # 🔥 ADD THIS
 
         ticket_id = generate_ticket_id()
         now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -405,15 +406,40 @@ def create_ticket():
         conn = get_db()
         c = conn.cursor()
 
-        c.execute("INSERT INTO tickets VALUES (?, ?, ?, ?, ?, ?, ?)",
-                  (ticket_id, email, subject, "Medium", "open", None, now))
+        # ✅ CREATE TICKET
+        c.execute(
+            "INSERT INTO tickets VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (ticket_id, email, subject, "Medium", "open", None, now)
+        )
 
-        c.execute("INSERT INTO messages VALUES (NULL, ?, ?, ?, ?)",
-                  (ticket_id, "user", message, now))
+        # ✅ SAVE TEXT MESSAGE
+        c.execute(
+            "INSERT INTO messages VALUES (NULL, ?, ?, ?, ?)",
+            (ticket_id, "user", message, now)
+        )
+
+        # 🔥 FIX: HANDLE FILE
+        if file and file.filename:
+            filename = secure_filename(file.filename)
+            file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            file.save(file_path)
+
+            # save file as message
+            c.execute(
+                "INSERT INTO messages VALUES (NULL, ?, ?, ?, ?)",
+                (ticket_id, "user", f"[FILE] {filename}", now)
+            )
+
+            # 🔥 OPTIONAL: send file to Telegram (you already built this)
+            try:
+                send_telegram_file(file_path, ticket_id, email)
+            except:
+                pass
 
         conn.commit()
         conn.close()
 
+        # ✅ TELEGRAM TEXT (unchanged)
         send_telegram(f"""
 🚨 New Ticket
 
@@ -427,6 +453,7 @@ Subject: {subject}
         return redirect(url_for('view_ticket', ticket_id=ticket_id))
 
     return render_template('create_ticket.html')
+
 
 
 @app.route('/ticket/<ticket_id>')
