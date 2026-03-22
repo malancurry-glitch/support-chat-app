@@ -31,7 +31,6 @@ body {
     color:white;
     display:flex;
     justify-content:space-between;
-    align-items:center;
 }
 
 .status {
@@ -58,22 +57,18 @@ body {
     padding:12px 14px;
     border-radius:14px;
     font-size:14px;
-    line-height:1.4;
-    animation:fadeIn 0.2s ease;
 }
 
 .user {
     background:#2563eb;
     color:white;
     align-self:flex-end;
-    border-bottom-right-radius:4px;
 }
 
 .admin {
     background:#e5e7eb;
     color:#111827;
     align-self:flex-start;
-    border-bottom-left-radius:4px;
 }
 
 /* Media */
@@ -88,7 +83,6 @@ body {
     font-size:10px;
     opacity:0.6;
     margin-top:4px;
-    text-align:right;
 }
 
 /* Download */
@@ -99,19 +93,11 @@ body {
     color:#2563eb;
 }
 
-/* Typing */
-.typing {
-    font-size:12px;
-    color:#6b7280;
-    padding-left:10px;
-}
-
 /* Input */
 .input-box {
     display:flex;
     padding:12px;
     border-top:1px solid #eee;
-    background:white;
 }
 
 input {
@@ -119,33 +105,16 @@ input {
     padding:12px;
     border-radius:20px;
     border:1px solid #ddd;
-    outline:none;
-    transition:0.2s;
-}
-
-input:focus {
-    border-color:#2563eb;
 }
 
 button {
     margin-left:8px;
-    padding:12px 14px;
+    padding:12px;
     border:none;
     border-radius:50%;
     background:#2563eb;
     color:white;
     cursor:pointer;
-    transition:0.2s;
-}
-
-button:hover {
-    background:#1d4ed8;
-}
-
-/* Animation */
-@keyframes fadeIn {
-    from {opacity:0; transform:translateY(5px);}
-    to {opacity:1; transform:translateY(0);}
 }
 </style>
 </head>
@@ -160,7 +129,6 @@ button:hover {
 </div>
 
 <div id="messages" class="messages">
-
 {% for msg in messages %}
 <div class="bubble {{msg[0]}}">
     {% if "[FILE]" in msg[1] %}
@@ -181,13 +149,12 @@ button:hover {
     <div class="time">{{msg[2]}}</div>
 </div>
 {% endfor %}
-
 </div>
 
-<div id="typing" class="typing"></div>
+<div id="typing" style="padding-left:10px;font-size:12px;"></div>
 
 <div class="input-box">
-    <input id="message" placeholder="Type a message..." onkeypress="handleKey(event)">
+    <input id="messageInput" placeholder="Type a message..." onkeypress="handleKey(event)">
     <input type="file" id="fileInput" hidden>
     <button onclick="upload()">📎</button>
     <button onclick="sendMessage()">➤</button>
@@ -196,9 +163,13 @@ button:hover {
 </div>
 
 <script>
-var socket = io();
+var socket = io(location.origin);
 var ticket_id = "{{ticket_id}}";
-let box = document.getElementById("messages");
+
+const box = document.getElementById("messages");
+const input = document.getElementById("messageInput");
+const fileInput = document.getElementById("fileInput");
+const typingEl = document.getElementById("typing");
 
 // Scroll
 function scrollDown(){
@@ -237,7 +208,7 @@ function addMessage(msg, sender, time=""){
 
 // Send message
 function sendMessage(){
-    let msg = message.value.trim();
+    let msg = input.value.trim();
     if(!msg) return;
 
     socket.emit('send_message',{
@@ -247,7 +218,7 @@ function sendMessage(){
     });
 
     addMessage(msg,"user",new Date().toLocaleTimeString());
-    message.value="";
+    input.value="";
 }
 
 // Upload file
@@ -257,13 +228,17 @@ function upload(){
 
 fileInput.onchange = ()=>{
     let file = fileInput.files[0];
+    if(!file) return;
+
     let form = new FormData();
     form.append("file", file);
 
     fetch(`/upload/${ticket_id}`,{
         method:"POST",
         body:form
-    }).then(()=> addMessage("[FILE] "+file.name,"user"));
+    }).then(()=> {
+        addMessage("[FILE] "+file.name,"user",new Date().toLocaleTimeString());
+    });
 };
 
 // Receive
@@ -274,13 +249,13 @@ socket.on('new_message', data=>{
 });
 
 // Typing
-message.addEventListener("input",()=>{
+input.addEventListener("input",()=>{
     socket.emit('typing',{});
 });
 
 socket.on('typing',()=>{
-    typing.innerText="Support is typing...";
-    setTimeout(()=>typing.innerText="",1500);
+    typingEl.innerText="Support is typing...";
+    setTimeout(()=>typingEl.innerText="",1500);
 });
 
 // Enter
