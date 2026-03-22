@@ -80,12 +80,6 @@ input, textarea, select {
     padding:15px;
     border-radius:10px;
 }
-
-/* Success */
-.success {
-    display:none;
-    text-align:center;
-}
 </style>
 </head>
 
@@ -101,7 +95,6 @@ input, textarea, select {
 <div id="step1" class="step active">
 <h3>Create Ticket</h3>
 
-<!-- 🔥 NEW NAME FIELD -->
 <div class="input-group">
 <input id="name" placeholder="Full Name">
 </div>
@@ -118,7 +111,6 @@ input, textarea, select {
 <h3>Issue Details</h3>
 
 <div class="input-group">
-<label>Select Issue</label>
 <select id="issueType" onchange="autoFill()">
 <option value="">-- Select Issue --</option>
 <option>Withdrawal</option>
@@ -134,13 +126,11 @@ input, textarea, select {
 </div>
 
 <div class="input-group">
-<label>Subject</label>
-<input id="subject">
+<input id="subject" placeholder="Subject">
 </div>
 
 <div class="input-group">
-<label>Description</label>
-<textarea id="message" oninput="countChars()"></textarea>
+<textarea id="message" oninput="countChars()" placeholder="Describe your issue"></textarea>
 <div class="counter" id="counter">0/500</div>
 </div>
 
@@ -167,7 +157,7 @@ input, textarea, select {
 <h3>Review</h3>
 
 <div class="summary">
-<p><b>Name:</b> <span id="sumName"></span></p> <!-- 🔥 NEW -->
+<p><b>Name:</b> <span id="sumName"></span></p>
 <p><b>Email:</b> <span id="sumEmail"></span></p>
 <p><b>Issue:</b> <span id="sumIssue"></span></p>
 <p><b>Subject:</b> <span id="sumSubject"></span></p>
@@ -178,59 +168,68 @@ input, textarea, select {
 <button class="btn" onclick="submitTicket()">Submit</button>
 </div>
 
-<!-- SUCCESS -->
-<div id="successBox" class="success">
-<h3>✅ Ticket Created</h3>
-<p id="ticketId"></p>
-</div>
-
 <p style="text-align:center;margin-top:20px;">
 <a href="/my-tickets" style="color:#2563eb;text-decoration:none;font-weight:500;">
-    View My Tickets
+View My Tickets
 </a>
 </p>
+
 </div>
 
 <script>
-// Step navigation
+// ---------------- INIT ----------------
+let nameEl = document.getElementById("name");
+let emailEl = document.getElementById("email");
+let subjectEl = document.getElementById("subject");
+let messageEl = document.getElementById("message");
+let issueTypeEl = document.getElementById("issueType");
+
+// ---------------- STEP ----------------
 function nextStep(n){
     document.querySelectorAll(".step").forEach(s=>s.classList.remove("active"));
     document.getElementById("step"+n).classList.add("active");
 }
 
-// Character counter
+// ---------------- COUNT ----------------
 function countChars(){
-    counter.innerText = message.value.length + "/500";
+    document.getElementById("counter").innerText = messageEl.value.length + "/500";
 }
 
-// Auto-fill
+// ---------------- AUTO FILL ----------------
 function autoFill(){
-    let issue = issueType.value;
+    let issue = issueTypeEl.value;
     if(!issue) return;
 
-    subject.value = issue + " Issue";
-    message.value = `Hello,\n\nI am experiencing an issue with: ${issue}.\n\nDetails:\n`;
+    subjectEl.value = issue + " Issue";
+    messageEl.value = `Hello,\n\nI am experiencing an issue with: ${issue}.\n\nDetails:\n`;
     countChars();
 }
 
-// Summary
+// ---------------- SUMMARY ----------------
 function showSummary(){
-    sumName.innerText = name.value;   // 🔥 NEW
-    sumEmail.innerText = email.value;
-    sumIssue.innerText = issueType.value;
-    sumSubject.innerText = subject.value;
-    sumMessage.innerText = message.value;
+    document.getElementById("sumName").innerText = nameEl.value;
+    document.getElementById("sumEmail").innerText = emailEl.value;
+    document.getElementById("sumIssue").innerText = issueTypeEl.value;
+    document.getElementById("sumSubject").innerText = subjectEl.value;
+    document.getElementById("sumMessage").innerText = messageEl.value;
     nextStep(4);
 }
 
-// Submit
+// ---------------- SAVE USER ----------------
+function saveUser(){
+    localStorage.setItem("user_email", emailEl.value);
+}
+
+// ---------------- SUBMIT ----------------
 async function submitTicket(){
+    saveUser();
+
     let formData = new FormData();
 
-    formData.append("name", name.value); // 🔥 NEW
-    formData.append("email", email.value);
-    formData.append("subject", subject.value);
-    formData.append("message", message.value);
+    formData.append("name", nameEl.value);
+    formData.append("email", emailEl.value);
+    formData.append("subject", subjectEl.value);
+    formData.append("message", messageEl.value);
     formData.append("priority","Medium");
 
     if(fileInput.files[0]){
@@ -246,7 +245,11 @@ async function submitTicket(){
     }
 }
 
-// File handling
+// ---------------- FILE ----------------
+let dropZone = document.getElementById("dropZone");
+let fileInput = document.getElementById("fileInput");
+let fileName = document.getElementById("fileName");
+
 dropZone.onclick = () => fileInput.click();
 
 fileInput.onchange = () => {
@@ -265,6 +268,14 @@ dropZone.addEventListener("drop", e=>{
     fileInput.files = e.dataTransfer.files;
     fileName.innerText = fileInput.files[0].name;
 });
+
+// ---------------- AUTO EMAIL ----------------
+window.onload = () => {
+    let saved = localStorage.getItem("user_email");
+    if(saved){
+        emailEl.value = saved;
+    }
+};
 </script>
 
 </body>

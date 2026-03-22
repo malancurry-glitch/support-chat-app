@@ -10,24 +10,40 @@ body {
     margin:0;
 }
 
+/* Container */
 .container {
     max-width:600px;
     margin:50px auto;
     background:white;
     padding:30px;
     border-radius:12px;
+    box-shadow:0 10px 30px rgba(0,0,0,0.1);
 }
 
+/* Ticket */
 .ticket {
     padding:15px;
     border-bottom:1px solid #eee;
     cursor:pointer;
+    transition:0.2s;
 }
 
 .ticket:hover {
     background:#f9fafb;
 }
 
+/* Status */
+.status {
+    font-size:12px;
+    padding:2px 6px;
+    border-radius:4px;
+    margin-left:5px;
+}
+
+.open { background:#22c55e; color:white; }
+.closed { background:#ef4444; color:white; }
+
+/* Button */
 .btn {
     padding:10px;
     background:#2563eb;
@@ -35,6 +51,14 @@ body {
     border:none;
     border-radius:6px;
     width:100%;
+    cursor:pointer;
+}
+
+/* Empty */
+.empty {
+    text-align:center;
+    color:#666;
+    margin-top:20px;
 }
 </style>
 
@@ -47,27 +71,54 @@ body {
 <h3>Find Your Tickets</h3>
 
 <form method="POST">
-    <input name="email" placeholder="Enter your email" required style="width:100%;padding:10px;margin-bottom:10px;">
+    <input id="emailInput" name="email" placeholder="Enter your email" required style="width:100%;padding:10px;margin-bottom:10px;">
     <button class="btn">Search</button>
 </form>
 
-{% if tickets %}
+{% if tickets is not none %}
 <hr>
+
+{% if tickets|length == 0 %}
+<div class="empty">
+No tickets found for {{email}}
+</div>
+{% else %}
+
 <h4>Tickets for {{email}}</h4>
 
 {% for t in tickets %}
 <div class="ticket" onclick="openTicket('{{t[0]}}')">
-    <b>{{t[1]}}</b><br>
+    <b>{{t[1]}}</b>
+    <span class="status {{ 'open' if t[2]=='open' else 'closed' }}">
+        {{t[2]}}
+    </span>
+    <br>
     <small>ID: {{t[0]}}</small><br>
-    <small>Status: {{t[2]}}</small>
+    <small>{{t[3]}}</small>
 </div>
 {% endfor %}
 
+{% endif %}
 {% endif %}
 
 </div>
 
 <script>
+// 🔥 AUTO-FILL EMAIL
+window.onload = () => {
+    let saved = localStorage.getItem("user_email");
+    if(saved){
+        document.getElementById("emailInput").value = saved;
+    }
+};
+
+// 🔥 SAVE EMAIL ON SUBMIT
+document.querySelector("form").addEventListener("submit", ()=>{
+    let email = document.getElementById("emailInput").value;
+    localStorage.setItem("user_email", email);
+});
+
+// 🔥 OPEN TICKET
 function openTicket(id){
     window.location.href = "/ticket/" + id;
 }
