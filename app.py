@@ -41,6 +41,7 @@ def init_db():
     c.execute('''
     CREATE TABLE IF NOT EXISTS tickets (
         id TEXT PRIMARY KEY,
+        name TEXT,
         email TEXT,
         subject TEXT,
         priority TEXT,
@@ -93,20 +94,29 @@ def send_telegram(text):
             print("⚠️ Telegram not configured")
             return
 
-        requests.post(
+        res = requests.post(
             f"https://api.telegram.org/bot{token}/sendMessage",
-            json={"chat_id": chat_id, "text": text}
+            json={
+                "chat_id": chat_id,
+                "text": text
+            }
         )
+
+        print("📤 TEXT SENT:", res.status_code)
 
     except Exception as e:
         print("❌ Telegram send error:", e)
 
 
-# 🔥 SEND WITH BUTTONS
+# ---------------- TELEGRAM SEND WITH BUTTONS ----------------
 def send_telegram_with_buttons(text, ticket_id):
     try:
         token = os.getenv("TELEGRAM_BOT_TOKEN")
         chat_id = os.getenv("TELEGRAM_CHAT_ID")
+
+        if not token or not chat_id:
+            print("⚠️ Telegram not configured")
+            return
 
         buttons = {
             "inline_keyboard": [
@@ -117,7 +127,7 @@ def send_telegram_with_buttons(text, ticket_id):
             ]
         }
 
-        requests.post(
+        res = requests.post(
             f"https://api.telegram.org/bot{token}/sendMessage",
             json={
                 "chat_id": chat_id,
@@ -126,18 +136,25 @@ def send_telegram_with_buttons(text, ticket_id):
             }
         )
 
+        print("📤 BUTTON MESSAGE SENT:", res.status_code)
+
     except Exception as e:
         print("❌ BUTTON ERROR:", e)
 
 
-# 🔥 DOWNLOAD TELEGRAM FILE
+# ---------------- DOWNLOAD TELEGRAM FILE ----------------
 def download_telegram_file(file_id):
     try:
         token = os.getenv("TELEGRAM_BOT_TOKEN")
 
         file_info = requests.get(
-            f"https://api.telegram.org/bot{token}/getFile?file_id={file_id}"
+            f"https://api.telegram.org/bot{token}/getFile",
+            params={"file_id": file_id}
         ).json()
+
+        if not file_info.get("ok"):
+            print("❌ TELEGRAM FILE ERROR:", file_info)
+            return None
 
         file_path = file_info["result"]["file_path"]
 
@@ -150,6 +167,8 @@ def download_telegram_file(file_id):
         with open(save_path, "wb") as f:
             f.write(file_data)
 
+        print("📥 FILE DOWNLOADED:", filename)
+
         return filename
 
     except Exception as e:
@@ -157,8 +176,8 @@ def download_telegram_file(file_id):
         return None
 
 
-# 🔥 SEND FILE TO TELEGRAM WITH CAPTION
-def send_telegram_file(file_path, ticket_id, email="User"):
+# ---------------- SEND FILE TO TELEGRAM ----------------
+def send_telegram_file(file_path, ticket_id, name="User", email=""):
     try:
         token = os.getenv("TELEGRAM_BOT_TOKEN")
         chat_id = os.getenv("TELEGRAM_CHAT_ID")
@@ -169,12 +188,15 @@ def send_telegram_file(file_path, ticket_id, email="User"):
 
         ext = file_path.split(".")[-1].lower()
 
+        # 🔥 IMPROVED CAPTION (includes NAME)
         caption = f"""📎 File from ticket
 
 ID: {ticket_id}
-User: {email}
+Name: {name}
+Email: {email}
 """
 
+        # 🔥 DETECT FILE TYPE
         if ext in ["jpg","jpeg","png","gif","webp"]:
             url = f"https://api.telegram.org/bot{token}/sendPhoto"
             key = "photo"
@@ -186,7 +208,7 @@ User: {email}
             key = "document"
 
         with open(file_path, "rb") as f:
-            requests.post(
+            res = requests.post(
                 url,
                 data={
                     "chat_id": chat_id,
@@ -195,7 +217,7 @@ User: {email}
                 files={key: f}
             )
 
-        print("📤 FILE SENT TO TELEGRAM:", file_path)
+        print("📤 FILE SENT:", res.status_code)
 
     except Exception as e:
         print("❌ TELEGRAM FILE ERROR:", e)
@@ -395,10 +417,12 @@ def download_file(filename):
 def create_ticket():
     if request.method == 'POST':
 
+        # 🔥 ADD NAME
+        name = request.form.get('name')
         email = request.form.get('email')
         subject = request.form.get('subject')
         message = request.form.get('message')
-        file = request.files.get('file')   # 🔥 ADD THIS
+        file = request.files.get('file')
 
         ticket_id = generate_ticket_id()
         now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -406,45 +430,45 @@ def create_ticket():
         conn = get_db()
         c = conn.cursor()
 
-        # ✅ CREATE TICKET
+        # ⚠️ MAKE SURE YOUR TABLE HAS name COLUMN
         c.execute(
-            "INSERT INTO tickets VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (ticket_id, email, subject, "Medium", "open", None, now)
+            "INSERT INTO tickets VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (ticket_id, name, email, subject, "Medium", "open", None, now)
         )
 
-        # ✅ SAVE TEXT MESSAGE
+        # SAVE TEXT MESSAGE
         c.execute(
             "INSERT INTO messages VALUES (NULL, ?, ?, ?, ?)",
             (ticket_id, "user", message, now)
         )
 
-        # 🔥 FIX: HANDLE FILE
+        # 🔥 HANDLE FILE
         if file and file.filename:
             filename = secure_filename(file.filename)
             file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
             file.save(file_path)
 
-            # save file as message
             c.execute(
                 "INSERT INTO messages VALUES (NULL, ?, ?, ?, ?)",
                 (ticket_id, "user", f"[FILE] {filename}", now)
             )
 
-            # 🔥 OPTIONAL: send file to Telegram (you already built this)
+            # 🔥 SEND FILE WITH NAME + EMAIL
             try:
-                send_telegram_file(file_path, ticket_id, email)
-            except:
-                pass
+                send_telegram_file(file_path, ticket_id, name, email)
+            except Exception as e:
+                print("File send error:", e)
 
         conn.commit()
         conn.close()
 
-        # ✅ TELEGRAM TEXT (unchanged)
+        # 🔥 TELEGRAM MESSAGE (FIXED)
         send_telegram(f"""
 🚨 New Ticket
 
 ID: {ticket_id}
-User: {email}
+Name: {name}
+Email: {email}
 Subject: {subject}
 
 {message}
@@ -453,7 +477,6 @@ Subject: {subject}
         return redirect(url_for('view_ticket', ticket_id=ticket_id))
 
     return render_template('create_ticket.html')
-
 
 
 @app.route('/ticket/<ticket_id>')

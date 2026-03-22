@@ -101,6 +101,11 @@ input, textarea, select {
 <div id="step1" class="step active">
 <h3>Create Ticket</h3>
 
+<!-- 🔥 NEW NAME FIELD -->
+<div class="input-group">
+<input id="name" placeholder="Full Name">
+</div>
+
 <div class="input-group">
 <input id="email" placeholder="Email">
 </div>
@@ -162,6 +167,7 @@ input, textarea, select {
 <h3>Review</h3>
 
 <div class="summary">
+<p><b>Name:</b> <span id="sumName"></span></p> <!-- 🔥 NEW -->
 <p><b>Email:</b> <span id="sumEmail"></span></p>
 <p><b>Issue:</b> <span id="sumIssue"></span></p>
 <p><b>Subject:</b> <span id="sumSubject"></span></p>
@@ -192,7 +198,7 @@ function countChars(){
     counter.innerText = message.value.length + "/500";
 }
 
-// Auto-fill subject + message
+// Auto-fill
 function autoFill(){
     let issue = issueType.value;
     if(!issue) return;
@@ -204,6 +210,7 @@ function autoFill(){
 
 // Summary
 function showSummary(){
+    sumName.innerText = name.value;   // 🔥 NEW
     sumEmail.innerText = email.value;
     sumIssue.innerText = issueType.value;
     sumSubject.innerText = subject.value;
@@ -214,6 +221,8 @@ function showSummary(){
 // Submit
 async function submitTicket(){
     let formData = new FormData();
+
+    formData.append("name", name.value); // 🔥 NEW
     formData.append("email", email.value);
     formData.append("subject", subject.value);
     formData.append("message", message.value);
