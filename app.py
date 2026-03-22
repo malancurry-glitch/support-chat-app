@@ -395,6 +395,7 @@ def telegram_webhook():
         msg = match.group(2).strip()
 
         now = datetime.datetime.now().strftime('%H:%M')
+        
 
         conn = get_db()
         c = conn.cursor()
@@ -409,6 +410,8 @@ def telegram_webhook():
             "INSERT INTO messages VALUES (NULL, ?, ?, ?, ?)",
             (ticket_id, "admin", msg, now)
         )
+        # ⚡ SEND TELEGRAM RESPONSE FIRST (INSTANT)
+        send_telegram(f"💬 Sent to #{ticket_id}")
 
         conn.commit()
         conn.close()
