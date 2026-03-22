@@ -253,6 +253,11 @@ def telegram_webhook():
         if not msg_obj:
             return "ok"
 
+        # ---------------- EXTRACT TICKET ID FUNCTION ----------------
+        def extract_ticket(text):
+            match = re.search(r"\d{5,6}", text)
+            return match.group(0) if match else None
+
         # ---------------- IMAGE ----------------
         if "photo" in msg_obj:
             file_id = msg_obj["photo"][-1]["file_id"]
@@ -262,13 +267,11 @@ def telegram_webhook():
                 return "ok"
 
             caption = msg_obj.get("caption", "")
+            ticket_id = extract_ticket(caption)
 
-            match = re.search(r"#?(\d+)", caption)
-            if not match:
+            if not ticket_id:
                 send_telegram("❌ Use caption:\n#123456")
                 return "ok"
-
-            ticket_id = match.group(1)
 
             now = datetime.datetime.now().strftime('%H:%M')
 
@@ -308,13 +311,11 @@ def telegram_webhook():
                 return "ok"
 
             caption = msg_obj.get("caption", "")
+            ticket_id = extract_ticket(caption)
 
-            match = re.search(r"#?(\d+)", caption)
-            if not match:
+            if not ticket_id:
                 send_telegram("❌ Use caption:\n#123456")
                 return "ok"
-
-            ticket_id = match.group(1)
 
             now = datetime.datetime.now().strftime('%H:%M')
 
@@ -348,9 +349,12 @@ def telegram_webhook():
         # ---------------- TEXT ----------------
         text = msg_obj.get("text", "").strip()
 
+        if not text:
+            return "ok"
+
         # CLOSE
         if text.lower().startswith("close "):
-            ticket_id = re.sub(r"\D", "", text)
+            ticket_id = extract_ticket(text)
 
             conn = get_db()
             c = conn.cursor()
@@ -363,7 +367,7 @@ def telegram_webhook():
 
         # OPEN
         if text.lower().startswith("open "):
-            ticket_id = re.sub(r"\D", "", text)
+            ticket_id = extract_ticket(text)
 
             conn = get_db()
             c = conn.cursor()
@@ -374,11 +378,11 @@ def telegram_webhook():
             send_telegram(f"🟢 Ticket #{ticket_id} reopened")
             return "ok"
 
-        # MESSAGE FORMAT
+        # MESSAGE
         match = re.match(r"#?(\d+):(.+)", text)
 
         if not match:
-            send_telegram("❌ Use format:\n#123456: your message")
+            send_telegram("❌ Use format:\n#123456: message")
             return "ok"
 
         ticket_id = match.group(1)
