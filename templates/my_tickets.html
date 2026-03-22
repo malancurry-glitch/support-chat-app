@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>My Tickets</title>
+
+<style>
+body {
+    font-family:sans-serif;
+    background:#f3f4f6;
+    margin:0;
+}
+
+.container {
+    max-width:600px;
+    margin:50px auto;
+    background:white;
+    padding:30px;
+    border-radius:12px;
+}
+
+.ticket {
+    padding:15px;
+    border-bottom:1px solid #eee;
+    cursor:pointer;
+}
+
+.ticket:hover {
+    background:#f9fafb;
+}
+
+.btn {
+    padding:10px;
+    background:#2563eb;
+    color:white;
+    border:none;
+    border-radius:6px;
+    width:100%;
+}
+</style>
+
+</head>
+
+<body>
+
+<div class="container">
+
+<h3>Find Your Tickets</h3>
+
+<form method="POST">
+    <input name="email" placeholder="Enter your email" required style="width:100%;padding:10px;margin-bottom:10px;">
+    <button class="btn">Search</button>
+</form>
+
+{% if tickets %}
+<hr>
+<h4>Tickets for {{email}}</h4>
+
+{% for t in tickets %}
+<div class="ticket" onclick="openTicket('{{t[0]}}')">
+    <b>{{t[1]}}</b><br>
+    <small>ID: {{t[0]}}</small><br>
+    <small>Status: {{t[2]}}</small>
+</div>
+{% endfor %}
+
+{% endif %}
+
+</div>
+
+<script>
+function openTicket(id){
+    window.location.href = "/ticket/" + id;
+}
+</script>
+
+</body>
+</html>

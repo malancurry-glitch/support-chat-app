@@ -566,6 +566,27 @@ def history(ticket_id):
     return jsonify(data)
 
 
+
+
+@app.route('/my-tickets', methods=['GET','POST'])
+def my_tickets():
+    if request.method == 'POST':
+        email = request.form.get('email')
+
+        conn = get_db()
+        c = conn.cursor()
+
+        c.execute("SELECT id, subject, status, created_at FROM tickets WHERE email=? ORDER BY created_at DESC", (email,))
+        tickets = c.fetchall()
+
+        conn.close()
+
+        return render_template('my_tickets.html', tickets=tickets, email=email)
+
+    return render_template('my_tickets.html', tickets=None)
+
+
+
 @app.route('/admin')
 def admin_dashboard():
     conn = get_db()
