@@ -5,6 +5,7 @@
 <script src="https://cdn.socket.io/4.0.1/socket.io.min.js"></script>
 
 <style>
+/* YOUR ORIGINAL CSS (UNCHANGED) */
 body { margin:0; font-family:-apple-system,BlinkMacSystemFont,sans-serif; background:#eef2ff; }
 
 .container { max-width:900px; margin:20px auto; background:white; border-radius:16px; display:flex; flex-direction:column; height:92vh; box-shadow:0 20px 60px rgba(0,0,0,0.12); }
@@ -92,6 +93,7 @@ button { margin-left:6px; padding:10px; border:none; border-radius:50%; backgrou
 </div>
 
 <div id="messages" class="messages"></div>
+
 <div id="typing" class="typing"></div>
 
 <div class="input-box">
@@ -109,8 +111,8 @@ var ticket_id = "{{ticket_id}}";
 
 const box = document.getElementById("messages");
 const typingEl = document.getElementById("typing");
-const agentStatus = document.getElementById("agentStatus");
 
+let activeAgents = [];
 let assignedAgent = null;
 
 // JOIN ROOM
@@ -218,26 +220,44 @@ socket.on("new_message",data=>{
     }
 });
 
-// 🔥 ASSIGNED
-socket.on("assigned", data=>{
-    if(data.ticket_id == ticket_id){
+// 🔥 AUTO ASSIGN FIRST AGENT (QUEUE SYSTEM)
+socket.on("agent_join",data=>{
+    activeAgents.push(data.agent);
+
+    if(!assignedAgent){
         assignedAgent = data.agent;
 
-        system(`<b>${assignedAgent}</b> is assigned to your ticket`);
+        system(`<b>${assignedAgent}</b> is assigned to you`);
 
-        agentStatus.innerText = "● Assigned to " + assignedAgent;
+        document.getElementById("agentStatus").innerText =
+            "● Assigned to " + assignedAgent;
     }
+
+    system(`<b>${data.agent}</b> joined the chat<br>${data.time}`);
 });
 
-// 🔥 TRANSFER (FIXED)
-socket.on("agent_transfer",data=>{
-    if(data.ticket_id == ticket_id){
-        assignedAgent = data.to;
+// 🔥 AGENT LEAVE
+socket.on("agent_leave",data=>{
+    activeAgents = activeAgents.filter(a=>a!==data.agent);
 
-        system(`🔁 Chat transferred to <b>${data.to}</b>`);
+    if(assignedAgent === data.agent){
+        assignedAgent = activeAgents[0] || null;
 
-        agentStatus.innerText = "● Assigned to " + data.to;
+        if(assignedAgent){
+            system(`Now handled by <b>${assignedAgent}</b>`);
+        } else {
+            system("Waiting for available agent...");
+        }
     }
+
+    system(`<b>${data.agent}</b> left the chat<br>${data.time}`);
+    updateStatus();
+});
+
+// 🔥 TRANSFER
+socket.on("agent_transfer",data=>{
+    assignedAgent = data.to;
+    system(`Chat transferred to <b>${data.to}</b>`);
 });
 
 // 🔥 TYPING
@@ -245,6 +265,23 @@ socket.on("typing",data=>{
     if(data.agent === assignedAgent){
         typingEl.innerText = data.agent + " is typing...";
         setTimeout(()=>typingEl.innerText="",1000);
+    }
+});
+
+// 🔥 STATUS
+function updateStatus(){
+    if(assignedAgent){
+        agentStatus.innerText = "● " + assignedAgent;
+    } else {
+        agentStatus.innerText = "● Waiting...";
+    }
+}
+
+// ENTER
+messageInput.addEventListener("keypress",e=>{
+    if(e.key==="Enter"){
+        e.preventDefault();
+        sendMessage();
     }
 });
 
@@ -257,14 +294,14 @@ function goBack(){
 window.onload=()=>{
     system("One of our Customer Support agents will be with you soon. Stay tuned!");
 };
-// 🔥 TRANSFERRING (NEW)
-socket.on("agent_transferring", data=>{
+socket.on("assigned", data=>{
     if(data.ticket_id == ticket_id){
-        system(`🔁 <b>${data.from}</b> is transferring your chat...`);
-        
-        // 🔥 update status instantly
+        assignedAgent = data.agent;
+
+        system(`<b>${assignedAgent}</b> is assigned to your ticket`);
+
         document.getElementById("agentStatus").innerText =
-            "● Transferring...";
+            "● Assigned to " + assignedAgent;
     }
 });
 </script>

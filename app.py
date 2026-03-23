@@ -242,6 +242,9 @@ def telegram_webhook():
             query = data["callback_query"]
             action = query["data"]
             agent = query["from"]["first_name"]
+            chat_id = str(query["from"]["id"])
+
+            AGENT_CHAT_MAP[agent] = chat_id
 
             conn = get_db()
             c = conn.cursor()
@@ -271,11 +274,17 @@ def telegram_webhook():
                 conn.close()
                 return "ok"
 
-            # ---------------- TRANSFER (MANUAL MODE) ----------------
+            # ---------------- TRANSFER (NOW WITH UI SIGNAL) ----------------
             if action.startswith("transfer_"):
                 ticket_id = action.replace("transfer_", "")
 
-                # 🔥 STORE STATE
+                # 🔥 SHOW "TRANSFERRING" IN CHAT IMMEDIATELY
+                socketio.emit("agent_transferring", {
+                    "ticket_id": ticket_id,
+                    "from": agent
+                }, room=ticket_id)
+
+                # 🔥 STORE STATE FOR MANUAL INPUT
                 TRANSFER_STATE[agent] = ticket_id
 
                 send_telegram(
@@ -283,6 +292,27 @@ def telegram_webhook():
                     ticket_id
                 )
 
+                return "ok"
+
+            # ---------------- CLOSE ----------------
+            if action.startswith("close_"):
+                ticket_id = action.replace("close_", "")
+
+                c.execute("SELECT assigned_to FROM tickets WHERE id=?", (ticket_id,))
+                row = c.fetchone()
+
+                if row and row["assigned_to"]:
+                    a = row["assigned_to"]
+                    agent_workload[a] = max(0, agent_workload.get(a, 1) - 1)
+
+                c.execute("UPDATE tickets SET status='closed' WHERE id=?", (ticket_id,))
+                conn.commit()
+
+                socketio.emit("ticket_closed", {}, room=ticket_id)
+
+                send_telegram(f"🔒 Ticket #{ticket_id} closed")
+
+                conn.close()
                 return "ok"
 
         # ---------------- NORMAL MESSAGE ----------------
@@ -299,7 +329,7 @@ def telegram_webhook():
 
         text = msg_obj.get("text", "").strip()
 
-        # ---------------- MANUAL TRANSFER COMMAND ----------------
+        # ---------------- MANUAL TRANSFER ----------------
         if text.lower().startswith("transfer:"):
             if agent not in TRANSFER_STATE:
                 send_telegram("❌ Click TRANSFER button first")
