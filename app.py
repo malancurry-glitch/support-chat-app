@@ -299,6 +299,8 @@ def telegram_webhook():
 
         now = datetime.datetime.now().strftime('%H:%M')
         agent = msg_obj.get("from", {}).get("first_name", "Agent")
+        chat_id = str(msg_obj.get("chat", {}).get("id"))
+        AGENT_CHAT_MAP[agent] = chat_id
 
         # ---------------- IMAGE ----------------
         if "photo" in msg_obj:
