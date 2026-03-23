@@ -6,6 +6,7 @@ import os
 import requests
 from werkzeug.utils import secure_filename
 from dotenv import load_dotenv
+from flask_socketio import join_room
 
 load_dotenv()
 
@@ -91,7 +92,6 @@ def send_telegram(text):
         chat_id = os.getenv("TELEGRAM_CHAT_ID")
 
         if not token or not chat_id:
-            print("⚠️ Telegram not configured")
             return
 
         requests.post(
@@ -111,12 +111,10 @@ def send_telegram_with_buttons(text, ticket_id):
         chat_id = os.getenv("TELEGRAM_CHAT_ID")
 
         buttons = {
-            "inline_keyboard": [
-                [
-                    {"text": "💬 Reply", "callback_data": f"reply_{ticket_id}"},
-                    {"text": "🔒 Close", "callback_data": f"close_{ticket_id}"}
-                ]
-            ]
+            "inline_keyboard": [[
+                {"text": "💬 Reply", "callback_data": f"reply_{ticket_id}"},
+                {"text": "🔒 Close", "callback_data": f"close_{ticket_id}"}
+            ]]
         }
 
         requests.post(
@@ -153,8 +151,9 @@ def download_telegram_file(file_id):
         content = requests.get(file_url, timeout=10).content
         filename = file_path.split("/")[-1]
 
-        path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        with open(path, "wb") as f:
+        save_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+
+        with open(save_path, "wb") as f:
             f.write(content)
 
         return filename
@@ -209,10 +208,9 @@ def telegram_webhook():
 
         data = request.get_json(force=True)
 
-        # helper
         def extract_id(text):
             m = re.search(r"#?\s*(\d+)", text)
-            return m.group(1) if m else None
+            return str(m.group(1)).strip() if m else None
 
         msg_obj = data.get("message") or data.get("edited_message")
         if not msg_obj:
@@ -237,12 +235,13 @@ def telegram_webhook():
             conn.commit()
             conn.close()
 
+            # 🔥 FIX: SEND TO ROOM (NOT BROADCAST)
             socketio.emit('new_message',{
                 "ticket_id":ticket_id,
                 "message":f"[FILE] {filename}",
                 "sender":"admin",
                 "time":now
-            }, broadcast=True)
+            }, room=ticket_id)
 
             send_telegram(f"📷 Sent to #{ticket_id}")
             return "ok"
@@ -271,7 +270,7 @@ def telegram_webhook():
                 "message":f"[FILE] {filename}",
                 "sender":"admin",
                 "time":now
-            }, broadcast=True)
+            }, room=ticket_id)
 
             send_telegram(f"🎥 Sent to #{ticket_id}")
             return "ok"
@@ -284,12 +283,11 @@ def telegram_webhook():
             send_telegram("❌ Use: #123456: message")
             return "ok"
 
-        ticket_id = match.group(1)
-        msg = match.group(2)
+        ticket_id = str(match.group(1)).strip()
+        msg = match.group(2).strip()
 
         now = datetime.datetime.now().strftime('%H:%M')
 
-        # ⚡ instant feedback FIRST
         send_telegram(f"💬 Sent to #{ticket_id}")
 
         conn = get_db()
@@ -304,7 +302,7 @@ def telegram_webhook():
             "message":msg,
             "sender":"admin",
             "time":now
-        }, broadcast=True)
+        }, room=ticket_id)   # 🔥 FIX HERE
 
     except Exception as e:
         print("❌ TELEGRAM ERROR:", e)
@@ -549,6 +547,12 @@ From: {data['sender']}
         "time": now
     }, broadcast=True)
 
+
+@socketio.on('join_ticket')
+def join_ticket(data):
+    ticket_id = str(data['ticket_id']).strip()
+    join_room(ticket_id)
+    print(f"User joined room {ticket_id}")
 
 # ---------------- RUN ----------------
 if __name__ == '__main__':
