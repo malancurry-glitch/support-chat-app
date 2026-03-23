@@ -102,15 +102,36 @@ def generate_ticket_id():
 
 
 # ---------------- TELEGRAM SEND ----------------
-def send_telegram(text):
+def send_telegram(text, ticket_id=None):
     try:
         token = os.getenv("TELEGRAM_BOT_TOKEN")
         chat_ids = os.getenv("TELEGRAM_CHAT_IDS", "").split(",")
+
+        conn = get_db()
+        c = conn.cursor()
+
+        assigned = None
+        if ticket_id:
+            c.execute("SELECT assigned_to FROM tickets WHERE id=?", (ticket_id,))
+            row = c.fetchone()
+            assigned = row["assigned_to"] if row else None
+
+        conn.close()
 
         for chat_id in chat_ids:
             chat_id = chat_id.strip()
             if not chat_id:
                 continue
+
+            # 🔥 BEFORE ASSIGNMENT → SEND TO ALL
+            if not assigned:
+                pass
+
+            # 🔥 AFTER ASSIGNMENT → SEND ONLY TO ASSIGNED AGENT
+            else:
+                # IMPORTANT: match agent name inside message
+                if assigned.lower() not in text.lower():
+                    continue
 
             res = requests.post(
                 f"https://api.telegram.org/bot{token}/sendMessage",
@@ -118,10 +139,11 @@ def send_telegram(text):
                 timeout=10
             )
 
-            print("📤 TELEGRAM:", chat_id, res.status_code, res.text)
+            print("📤 TELEGRAM:", chat_id, res.status_code)
 
     except Exception as e:
         print("❌ Telegram send error:", e)
+
 
 
 # ---------------- AUTO ASSIGN LEAST BUSY ----------------
@@ -308,7 +330,7 @@ def telegram_webhook():
                 "agent": agent
             }, room=ticket_id)
 
-            send_telegram(f"📷 Sent to #{ticket_id}")
+            send_telegram(f"💬 From: {agent}\nTicket #{ticket_id}\n{msg}", ticket_id)
             return "ok"
 
         # ---------------- VIDEO ----------------
@@ -387,7 +409,7 @@ def telegram_webhook():
             "agent": agent
         }, room=ticket_id)
 
-        send_telegram(f"💬 Sent to #{ticket_id}")
+        send_telegram(f"💬 From: {agent}\nTicket #{ticket_id}\n{msg}", ticket_id)
 
     except Exception as e:
         print("❌ TELEGRAM ERROR:", e)
