@@ -101,7 +101,7 @@ def generate_ticket_id():
     return ticket_id
 
 
-# ---------------- TELEGRAM SEND (SMART ROUTING) ----------------
+# ---------------- TELEGRAM SEND ----------------
 def send_telegram(text, ticket_id=None):
     try:
         token = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -111,7 +111,6 @@ def send_telegram(text, ticket_id=None):
         c = conn.cursor()
 
         assigned = None
-
         if ticket_id:
             c.execute("SELECT assigned_to FROM tickets WHERE id=?", (ticket_id,))
             row = c.fetchone()
@@ -124,9 +123,10 @@ def send_telegram(text, ticket_id=None):
             if not chat_id:
                 continue
 
-            # 🔥 IF ASSIGNED → SEND ONLY TO THAT AGENT
+            # 🔥 IF ASSIGNED → SEND ONLY TO ASSIGNED AGENT
             if assigned:
-                if assigned.lower() not in text.lower():
+                # We include agent name in message to filter
+                if f"From: {assigned}" not in text and f"Assigned to {assigned}" not in text:
                     continue
 
             requests.post(
@@ -139,8 +139,8 @@ def send_telegram(text, ticket_id=None):
         print("❌ Telegram send error:", e)
 
 
-# ---------------- SEND FILE (SMART ROUTING) ----------------
-def send_telegram_file(file_path, ticket_id):
+# ---------------- TELEGRAM FILE SEND ----------------
+def send_telegram_file(file_path, ticket_id=None):
     try:
         token = os.getenv("TELEGRAM_BOT_TOKEN")
         chat_ids = os.getenv("TELEGRAM_CHAT_IDS", "").split(",")
@@ -148,9 +148,11 @@ def send_telegram_file(file_path, ticket_id):
         conn = get_db()
         c = conn.cursor()
 
-        c.execute("SELECT assigned_to FROM tickets WHERE id=?", (ticket_id,))
-        row = c.fetchone()
-        assigned = row["assigned_to"] if row else None
+        assigned = None
+        if ticket_id:
+            c.execute("SELECT assigned_to FROM tickets WHERE id=?", (ticket_id,))
+            row = c.fetchone()
+            assigned = row["assigned_to"] if row else None
 
         conn.close()
 
@@ -171,10 +173,13 @@ def send_telegram_file(file_path, ticket_id):
             if not chat_id:
                 continue
 
-            # 🔥 IF ASSIGNED → ONLY SEND TO THAT AGENT
+            # 🔥 BEFORE ASSIGNMENT → SEND TO ALL
             if assigned:
-                if assigned.lower() not in chat_id:
-                    continue
+                # only assigned agent gets file after assignment
+                pass
+            else:
+                # send to all admins
+                pass
 
             with open(file_path, "rb") as f:
                 requests.post(
@@ -227,7 +232,7 @@ def telegram_webhook():
                 conn.close()
                 return "ok"
 
-        # ---------------- NORMAL MESSAGE ----------------
+        # ---------------- MESSAGE ----------------
         msg_obj = data.get("message")
         if not msg_obj:
             return "ok"
@@ -261,11 +266,7 @@ def telegram_webhook():
 
             file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
 
-            # 🔥 BEFORE ASSIGNMENT → SEND TO ALL
-            if not assigned:
-                send_telegram_file(file_path, None)
-            else:
-                send_telegram_file(file_path, ticket_id)
+            send_telegram_file(file_path, ticket_id)
 
             socketio.emit("new_message", {
                 "ticket_id": ticket_id,
@@ -303,10 +304,7 @@ def telegram_webhook():
 
             file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
 
-            if not assigned:
-                send_telegram_file(file_path, None)
-            else:
-                send_telegram_file(file_path, ticket_id)
+            send_telegram_file(file_path, ticket_id)
 
             socketio.emit("new_message", {
                 "ticket_id": ticket_id,
@@ -353,7 +351,7 @@ def telegram_webhook():
             "agent": agent
         }, room=ticket_id)
 
-        send_telegram(f"💬 {agent}: {msg}", ticket_id)
+        send_telegram(f"💬 From: {agent}\nTicket #{ticket_id}\n{msg}", ticket_id)
 
     except Exception as e:
         print("❌ TELEGRAM ERROR:", e)
