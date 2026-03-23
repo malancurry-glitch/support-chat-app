@@ -45,10 +45,22 @@ body {
     padding:12px;
     border-bottom:1px solid #374151;
     cursor:pointer;
+    position:relative;
 }
 
 .ticket:hover { background:#374151; }
 .active-ticket { background:#2563eb; }
+
+.unread {
+    position:absolute;
+    right:10px;
+    top:10px;
+    background:red;
+    color:white;
+    font-size:10px;
+    padding:2px 6px;
+    border-radius:10px;
+}
 
 .main {
     flex:1;
@@ -176,13 +188,23 @@ button {
 <script>
 let socket = io();
 let currentTicket = null;
+let currentStatus = "open";
+let unreadMap = {};
 
 const messagesEl = document.getElementById("messages");
 const titleEl = document.getElementById("ticketTitle");
 const inputEl = document.getElementById("messageInput");
 const fileInput = document.getElementById("fileInput");
 
-// CLICK TICKET
+// 🔔 enable notifications
+if ("Notification" in window) {
+    Notification.requestPermission();
+}
+
+// 🔊 sound
+let audio = new Audio("https://actions.google.com/sounds/v1/alarms/beep_short.ogg");
+
+// CLICK
 document.querySelectorAll(".ticket").forEach(el=>{
     el.addEventListener("click", ()=>{
         loadTicket(el.dataset.id, el);
@@ -192,20 +214,26 @@ document.querySelectorAll(".ticket").forEach(el=>{
 // LOAD
 function loadTicket(id, el){
     currentTicket = id;
+    unreadMap[id] = 0;
 
     socket.emit("join_ticket", { ticket_id:id });
 
     document.querySelectorAll(".ticket").forEach(t=>t.classList.remove("active-ticket"));
     el.classList.add("active-ticket");
 
+    let statusText = el.innerText.toLowerCase();
+    currentStatus = statusText.includes("closed") ? "closed" : "open";
+
+    titleEl.innerText = "Ticket: "+id+" ("+currentStatus+")";
+
     fetch(`/api/history/${id}`)
     .then(res=>res.json())
     .then(data=>{
         messagesEl.innerHTML="";
-        titleEl.innerText="Ticket: "+id;
-
         data.forEach(m=>addMessage(m.message,m.sender,m.time));
     });
+
+    updateUnreadUI(el, 0);
 }
 
 // ADD MESSAGE
@@ -238,13 +266,15 @@ function addMessage(msg,sender,time=""){
     messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
-// SEND TEXT
+// SEND
 function sendReply(){
-    let msg=inputEl.value.trim();
-    if(!msg || !currentTicket){
-        alert("Select ticket first");
+    if(currentStatus==="closed"){
+        alert("Ticket is closed");
         return;
     }
+
+    let msg=inputEl.value.trim();
+    if(!msg || !currentTicket) return;
 
     socket.emit('send_message',{
         ticket_id:currentTicket,
@@ -256,10 +286,10 @@ function sendReply(){
     inputEl.value="";
 }
 
-// UPLOAD FILE
+// FILE
 function uploadFile(){
-    if(!currentTicket){
-        alert("Select ticket first");
+    if(currentStatus==="closed"){
+        alert("Ticket is closed");
         return;
     }
     fileInput.click();
@@ -282,14 +312,18 @@ fileInput.onchange = ()=>{
 
 // CLOSE
 function closeTicket(){
-    if(!currentTicket) return;
-    fetch(`/close/${currentTicket}`);
+    fetch(`/close/${currentTicket}`).then(()=>{
+        currentStatus="closed";
+        titleEl.innerText="Ticket: "+currentTicket+" (closed)";
+    });
 }
 
 // OPEN
 function openTicket(){
-    if(!currentTicket) return;
-    fetch(`/open/${currentTicket}`);
+    fetch(`/open/${currentTicket}`).then(()=>{
+        currentStatus="open";
+        titleEl.innerText="Ticket: "+currentTicket+" (open)";
+    });
 }
 
 // SEARCH
@@ -300,10 +334,34 @@ function filterTickets(){
     });
 }
 
+// 🔴 UNREAD UI
+function updateUnreadUI(el,count){
+    let badge = el.querySelector(".unread");
+    if(!badge){
+        badge = document.createElement("div");
+        badge.className="unread";
+        el.appendChild(badge);
+    }
+    badge.innerText=count;
+    badge.style.display = count>0 ? "block":"none";
+}
+
 // REALTIME
 socket.on('new_message',data=>{
+    let ticketEl = document.querySelector(`[data-id="${data.ticket_id}"]`);
+
     if(data.ticket_id===currentTicket){
         addMessage(data.message,data.sender,data.time);
+    } else {
+        unreadMap[data.ticket_id] = (unreadMap[data.ticket_id]||0)+1;
+        if(ticketEl) updateUnreadUI(ticketEl, unreadMap[data.ticket_id]);
+
+        // 🔔 notification
+        if(Notification.permission==="granted"){
+            new Notification("New Ticket Reply", { body:data.message });
+        }
+
+        audio.play();
     }
 });
 
