@@ -515,20 +515,22 @@ def handle_message(data):
 
     now = datetime.datetime.now().strftime('%H:%M')
 
+    ticket_id = str(data['ticket_id']).strip()   # 🔥 IMPORTANT
+
     conn = get_db()
     c = conn.cursor()
 
     c.execute("INSERT INTO messages VALUES (NULL, ?, ?, ?, ?)",
-              (data['ticket_id'], data['sender'], data['message'], now))
+              (ticket_id, data['sender'], data['message'], now))
 
     conn.commit()
     conn.close()
 
-    # 🔥 SEND TEXT
+    # 🔥 TELEGRAM SEND (unchanged)
     send_telegram(f"""
 💬 Message
 
-Ticket: {data['ticket_id']}
+Ticket: #{ticket_id}
 From: {data['sender']}
 
 {data['message']}
@@ -538,14 +540,15 @@ From: {data['sender']}
     if data['message'].startswith("[FILE]"):
         filename = data['message'].replace("[FILE] ", "")
         file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        send_telegram_file(file_path)
+        send_telegram_file(file_path, ticket_id)
 
-    emit('new_message', {
-        "ticket_id": data['ticket_id'],
+    # ✅ 🔥 FIX: SEND TO ROOM (NOT BROADCAST)
+    socketio.emit('new_message', {
+        "ticket_id": ticket_id,
         "message": data['message'],
         "sender": data['sender'],
         "time": now
-    }, broadcast=True)
+    }, room=ticket_id)
 
 
 @socketio.on('join_ticket')

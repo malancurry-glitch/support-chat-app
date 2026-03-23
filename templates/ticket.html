@@ -28,6 +28,7 @@ body {
     color:white;
     display:flex;
     justify-content:space-between;
+    align-items:center;
 }
 
 .back {
@@ -115,7 +116,6 @@ button {
 
 {% for msg in messages %}
 <div class="bubble {{msg[0]}}">
-
     {% if "[FILE]" in msg[1] %}
         {% set file = msg[1].replace("[FILE] ", "") %}
         {% set ext = file.split('.')[-1].lower() %}
@@ -142,7 +142,7 @@ button {
 
 </div>
 
-<div id="typing"></div>
+<div id="typing" style="padding-left:10px;font-size:12px;color:#666;"></div>
 
 <div class="input-box">
     <input id="messageInput" placeholder="Type a message...">
@@ -161,10 +161,21 @@ const box = document.getElementById("messages");
 const input = document.getElementById("messageInput");
 const fileInput = document.getElementById("fileInput");
 
+// 🔥 IMPORTANT FIX (JOIN ROOM)
+socket.emit("join_ticket", {
+    ticket_id: ticket_id
+});
+
 // BACK
 function goBack(){
     window.location.href = "/my-tickets";
 }
+
+// SCROLL
+function scrollDown(){
+    box.scrollTop = box.scrollHeight;
+}
+scrollDown();
 
 // ADD MESSAGE
 function addMessage(msg, sender, time=""){
@@ -185,22 +196,24 @@ function addMessage(msg, sender, time=""){
         else{
             div.innerHTML = `<a href="${url}" target="_blank">📎 ${file}</a>`;
         }
+
+        div.innerHTML += `<br><a href="/download/${file}" style="font-size:11px;">⬇ Download</a>`;
     } else {
-        div.innerHTML = msg;
+        div.innerText = msg;
     }
 
     div.innerHTML += `<div class="time">${time}</div>`;
     box.appendChild(div);
-    box.scrollTop = box.scrollHeight;
+    scrollDown();
 }
 
-// SEND
+// SEND MESSAGE
 function sendMessage(){
     let msg = input.value.trim();
     if(!msg) return;
 
     socket.emit('send_message',{
-        ticket_id,
+        ticket_id: ticket_id,
         sender:'user',
         message:msg
     });
@@ -225,18 +238,18 @@ fileInput.onchange = ()=>{
         method:"POST",
         body:form
     }).then(()=>{
-        addMessage("[FILE] "+file.name,"user");
+        addMessage("[FILE] "+file.name,"user",new Date().toLocaleTimeString());
     });
 };
 
-// RECEIVE
+// 🔥 RECEIVE REALTIME (NOW WORKS INSTANTLY)
 socket.on('new_message', data=>{
-    if(data.ticket_id===ticket_id){
+    if(String(data.ticket_id) === String(ticket_id)){
         addMessage(data.message,data.sender,data.time);
     }
 });
 
-// ENTER
+// ENTER SEND
 input.addEventListener("keypress", e=>{
     if(e.key==="Enter"){
         e.preventDefault();
