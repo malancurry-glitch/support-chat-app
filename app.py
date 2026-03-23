@@ -475,11 +475,18 @@ def upload_file(ticket_id):
     conn.commit()
     conn.close()
 
-    # ✅ FIX: pass ticket_id
+    # 🔥 FIX: SEND TO UI INSTANTLY
+    socketio.emit('new_message', {
+        "ticket_id": ticket_id,
+        "message": f"[FILE] {filename}",
+        "sender": "user",
+        "time": now,
+        "agent": "User"
+    }, room=ticket_id)
+
     send_telegram_file(file_path, ticket_id, email="User")
 
     return {"status": "ok"}
-
 
 
 @app.route('/close/<ticket_id>')
@@ -654,6 +661,7 @@ def admin_stats():
 def handle_message(data):
     try:
         now = datetime.datetime.now().strftime('%H:%M')
+
         ticket_id = str(data.get('ticket_id', '')).strip()
         sender = data.get('sender', 'user')
         message = data.get('message', '').strip()
@@ -661,10 +669,8 @@ def handle_message(data):
         if not ticket_id or not message:
             return
 
-        # 🔥 GET AGENT NAME (REAL ADMIN)
         agent_name = session.get("admin", "Agent") if sender == "admin" else "User"
 
-        # ---------------- SAVE MESSAGE ----------------
         conn = get_db()
         c = conn.cursor()
 
@@ -676,7 +682,7 @@ def handle_message(data):
         conn.commit()
         conn.close()
 
-        # ---------------- TELEGRAM SEND ----------------
+        # 🔥 TELEGRAM SAFE SEND
         try:
             send_telegram(f"""
 💬 Message
@@ -689,30 +695,32 @@ From: {agent_name}
         except:
             pass
 
-        # ---------------- FILE SEND ----------------
+        # 🔥 FILE CHECK
         if message.startswith("[FILE]"):
-            filename = message.replace("[FILE] ", "").strip()
+            filename = message.replace("[FILE] ", "")
             file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
 
             if os.path.exists(file_path):
                 send_telegram_file(file_path, ticket_id)
 
-        # ---------------- REALTIME MESSAGE ----------------
+        # 🔥 ALWAYS EMIT BACK (FIX)
         socketio.emit('new_message', {
             "ticket_id": ticket_id,
             "message": message,
             "sender": sender,
             "time": now,
-            "agent": agent_name   # 🔥 IMPORTANT (frontend uses this)
+            "agent": agent_name
         }, room=ticket_id)
 
-        # ---------------- DELIVERY STATUS ----------------
         socketio.emit('delivered', {
             "ticket_id": ticket_id
         }, room=ticket_id)
 
     except Exception as e:
         print("❌ SOCKET ERROR:", e)
+
+
+
 
 @socketio.on('agent_join')
 def agent_join(data):
@@ -742,6 +750,22 @@ def agent_leave(data):
 def agent_transfer(data):
     socketio.emit("agent_transfer", data, room=data["ticket_id"])
 
+
+
+
+
+@socketio.on('disconnect')
+def agent_disconnect():
+    if "admin" in session:
+        agent_name = session.get("admin", "Agent")
+        now = datetime.datetime.now().strftime('%d %b %Y, %I:%M %p')
+
+        socketio.emit('agent_leave', {
+            "agent": agent_name,
+            "time": now
+        })
+
+        
 
 # ---------------- JOIN ROOM ----------------
 @socketio.on('join_ticket')
