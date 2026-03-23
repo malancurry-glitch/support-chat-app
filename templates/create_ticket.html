@@ -3,8 +3,6 @@
 <head>
 <title>Submit a Request</title>
 
-<meta name="viewport" content="width=device-width, initial-scale=1">
-
 <style>
 :root { --primary:#2563eb; }
 
@@ -14,14 +12,14 @@ body {
     background:#f3f4f6;
 }
 
-.header { text-align:center; padding:20px; }
-.logo { height:45px; }
+.header { text-align:center; padding:30px; }
+.logo { height:50px; }
 
 .container {
     max-width:650px;
     margin:auto;
     background:white;
-    padding:20px;
+    padding:30px;
     border-radius:12px;
     box-shadow:0 10px 30px rgba(0,0,0,0.1);
 }
@@ -36,11 +34,13 @@ input, textarea, select {
     padding:12px;
     border-radius:8px;
     border:1px solid #ccc;
+    outline:none;
 }
 
 .counter {
     font-size:12px;
     text-align:right;
+    color:#666;
 }
 
 .file-box {
@@ -51,10 +51,9 @@ input, textarea, select {
     cursor:pointer;
 }
 
-.preview img, .preview video {
-    max-width:100%;
-    margin-top:10px;
-    border-radius:10px;
+.file-box.drag {
+    border-color:var(--primary);
+    background:#eef4ff;
 }
 
 .btn {
@@ -63,19 +62,34 @@ input, textarea, select {
     border-radius:8px;
     background:var(--primary);
     color:white;
+    cursor:pointer;
     width:100%;
 }
 
 .btn.secondary { background:#ccc; }
 
+.btn:disabled {
+    background:#9ca3af;
+    cursor:not-allowed;
+}
+
+.summary {
+    background:#f9fafb;
+    padding:15px;
+    border-radius:10px;
+}
+
 .loading {
     text-align:center;
+    margin-top:10px;
     display:none;
 }
 
+/* 🔥 ADDED SUCCESS STYLE */
 .success-box {
     display:none;
     text-align:center;
+    margin-top:20px;
 }
 </style>
 </head>
@@ -83,7 +97,7 @@ input, textarea, select {
 <body>
 
 <div class="header">
-<img src="/static/logo.png" class="logo">
+    <img src="/static/logo.png" class="logo">
 </div>
 
 <div class="container">
@@ -92,8 +106,13 @@ input, textarea, select {
 <div id="step1" class="step active">
 <h3>Create Ticket</h3>
 
-<input id="name" placeholder="Full Name">
-<input id="email" placeholder="Email">
+<div class="input-group">
+<input id="name" placeholder="Full Name" required>
+</div>
+
+<div class="input-group">
+<input id="email" placeholder="Email" required>
+</div>
 
 <button class="btn" onclick="validateStep1()">Next</button>
 </div>
@@ -102,16 +121,29 @@ input, textarea, select {
 <div id="step2" class="step">
 <h3>Issue Details</h3>
 
+<div class="input-group">
 <select id="issueType" onchange="autoFill()">
-<option value="">Select Issue</option>
+<option value="">-- Select Issue --</option>
 <option>Withdrawal</option>
 <option>Deposit</option>
+<option>SMS not received</option>
+<option>Email not received</option>
+<option>Code not received</option>
+<option>Change of address</option>
+<option>Change of email address</option>
+<option>Change of phone number</option>
+<option>Change of name</option>
 </select>
+</div>
 
+<div class="input-group">
 <input id="subject" placeholder="Subject">
+</div>
 
+<div class="input-group">
 <textarea id="message" oninput="countChars()" placeholder="Describe your issue"></textarea>
 <div class="counter" id="counter">0/500</div>
+</div>
 
 <button class="btn secondary" onclick="nextStep(1)">Back</button>
 <button class="btn" onclick="validateStep2()">Next</button>
@@ -123,9 +155,8 @@ input, textarea, select {
 
 <div id="dropZone" class="file-box">
 <input type="file" id="fileInput" hidden>
-<p>Click or drop file</p>
+<p>Drop file or click</p>
 <div id="fileName"></div>
-<div class="preview" id="preview"></div>
 </div>
 
 <button class="btn secondary" onclick="nextStep(2)">Back</button>
@@ -136,10 +167,13 @@ input, textarea, select {
 <div id="step4" class="step">
 <h3>Review</h3>
 
+<div class="summary">
 <p><b>Name:</b> <span id="sumName"></span></p>
 <p><b>Email:</b> <span id="sumEmail"></span></p>
+<p><b>Issue:</b> <span id="sumIssue"></span></p>
 <p><b>Subject:</b> <span id="sumSubject"></span></p>
 <p><b>Message:</b> <span id="sumMessage"></span></p>
+</div>
 
 <button class="btn secondary" onclick="nextStep(3)">Back</button>
 <button class="btn" id="submitBtn" onclick="submitTicket()">Submit</button>
@@ -147,35 +181,42 @@ input, textarea, select {
 <div class="loading" id="loading">Submitting...</div>
 </div>
 
-<!-- SUCCESS -->
+<!-- 🔥 ADDED SUCCESS UI -->
 <div id="successBox" class="success-box">
 <h2>✅ Ticket Created</h2>
 <p>Your Ticket ID:</p>
 <h3 id="ticketId"></h3>
-<p id="autoText"></p>
-<a href="/my-tickets">View My Tickets</a>
+<p id="countdownText"></p>
 </div>
+
+<p style="text-align:center;margin-top:20px;">
+<a href="/my-tickets" style="color:#2563eb;text-decoration:none;font-weight:500;">
+View My Tickets
+</a>
+</p>
 
 </div>
 
 <script>
+// ELEMENTS
 let nameEl = document.getElementById("name");
 let emailEl = document.getElementById("email");
 let subjectEl = document.getElementById("subject");
 let messageEl = document.getElementById("message");
+let issueTypeEl = document.getElementById("issueType");
 
 let createdTicketId = null;
 
-// STEP
+// STEP NAV
 function nextStep(n){
     document.querySelectorAll(".step").forEach(s=>s.classList.remove("active"));
     document.getElementById("step"+n).classList.add("active");
 }
 
-// VALIDATE
+// VALIDATION
 function validateStep1(){
     if(!nameEl.value || !emailEl.value){
-        alert("Fill all fields");
+        alert("Please fill name and email");
         return;
     }
     nextStep(2);
@@ -183,7 +224,7 @@ function validateStep1(){
 
 function validateStep2(){
     if(!subjectEl.value || !messageEl.value){
-        alert("Fill all fields");
+        alert("Please fill subject and message");
         return;
     }
     nextStep(3);
@@ -191,30 +232,43 @@ function validateStep2(){
 
 // COUNT
 function countChars(){
-    counter.innerText = messageEl.value.length + "/500";
+    document.getElementById("counter").innerText = messageEl.value.length + "/500";
 }
 
-// AUTO
+// AUTO FILL
 function autoFill(){
-    subjectEl.value = issueType.value + " Issue";
+    let issue = issueTypeEl.value;
+    if(!issue) return;
+
+    subjectEl.value = issue + " Issue";
+    messageEl.value = `Hello,\n\nI am experiencing an issue with: ${issue}.\n\nDetails:\n`;
+    countChars();
 }
 
 // SUMMARY
 function showSummary(){
-    sumName.innerText = nameEl.value;
-    sumEmail.innerText = emailEl.value;
-    sumSubject.innerText = subjectEl.value;
-    sumMessage.innerText = messageEl.value;
+    document.getElementById("sumName").innerText = nameEl.value;
+    document.getElementById("sumEmail").innerText = emailEl.value;
+    document.getElementById("sumIssue").innerText = issueTypeEl.value;
+    document.getElementById("sumSubject").innerText = subjectEl.value;
+    document.getElementById("sumMessage").innerText = messageEl.value;
     nextStep(4);
 }
 
-// 🔥 FIXED SUBMIT (REAL FIX)
+// SAVE EMAIL
+function saveUser(){
+    localStorage.setItem("user_email", emailEl.value);
+}
+
+// 🔥 UPDATED SUBMIT (ONLY ADDITION)
 async function submitTicket(){
     let btn = document.getElementById("submitBtn");
     let loading = document.getElementById("loading");
 
     btn.disabled = true;
     loading.style.display = "block";
+
+    saveUser();
 
     let formData = new FormData();
     formData.append("name", nameEl.value);
@@ -227,25 +281,33 @@ async function submitTicket(){
     }
 
     try{
-        let res = await fetch("/", {
-            method:"POST",
-            body:formData,
-            redirect:"manual"
-        });
+        let res = await fetch("/", { method:"POST", body:formData });
 
-        let location = res.headers.get("Location");
+        if(res.redirected){
+            let id = res.url.split("/").pop();
+            createdTicketId = id;
 
-        if(location){
-            createdTicketId = location.split("/").pop();
-
+            // 🔥 hide form
             document.querySelectorAll(".step").forEach(s=>s.style.display="none");
+
+            // 🔥 show success
             document.getElementById("successBox").style.display = "block";
+            document.getElementById("ticketId").innerText = "#" + id;
 
-            document.getElementById("ticketId").innerText = "#" + createdTicketId;
+            // 🔥 countdown
+            let time = 10;
+            let txt = document.getElementById("countdownText");
 
-            showDelivered();
-            enableNotifications();
-            startAutoOpen();
+            let interval = setInterval(()=>{
+                txt.innerText = "Opening chat in " + time + " seconds...";
+                time--;
+
+                if(time < 0){
+                    clearInterval(interval);
+                    window.location.href = "/ticket/" + id;
+                }
+            },1000);
+
         } else {
             alert("Error submitting ticket");
         }
@@ -258,65 +320,29 @@ async function submitTicket(){
     loading.style.display = "none";
 }
 
-// 🔥 AUTO OPEN
-function startAutoOpen(){
-    let time = 10;
-    let el = document.getElementById("autoText");
-
-    let i = setInterval(()=>{
-        el.innerText = "Opening chat in " + time + "s...";
-        time--;
-
-        if(time < 0){
-            clearInterval(i);
-            window.location.href = "/ticket/" + createdTicketId;
-        }
-    },1000);
-}
-
-// 🔥 DELIVERY CHECK
-function showDelivered(){
-    let el = document.createElement("div");
-    el.innerText = "✓ Delivered";
-    el.style.fontSize = "12px";
-    el.style.color = "green";
-    document.getElementById("successBox").appendChild(el);
-}
-
-// 🔥 NOTIFICATION
-function enableNotifications(){
-    if ("Notification" in window){
-        Notification.requestPermission();
-    }
-}
-
 // FILE
 let dropZone = document.getElementById("dropZone");
 let fileInput = document.getElementById("fileInput");
 let fileName = document.getElementById("fileName");
-let preview = document.getElementById("preview");
 
-dropZone.onclick = ()=>fileInput.click();
+dropZone.onclick = () => fileInput.click();
 
-fileInput.onchange = ()=>{
-    let file = fileInput.files[0];
-    if(!file) return;
-
-    fileName.innerText = file.name;
-    preview.innerHTML = "";
-
-    if(file.type.startsWith("image")){
-        let img = document.createElement("img");
-        img.src = URL.createObjectURL(file);
-        preview.appendChild(img);
-    }
-    else if(file.type.startsWith("video")){
-        let vid = document.createElement("video");
-        vid.src = URL.createObjectURL(file);
-        vid.controls = true;
-        preview.appendChild(vid);
+fileInput.onchange = () => {
+    if(fileInput.files[0]){
+        fileName.innerText = fileInput.files[0].name;
     }
 };
+
+dropZone.addEventListener("dragover", e=>{
+    e.preventDefault();
+    dropZone.classList.add("drag");
+});
+
+dropZone.addEventListener("drop", e=>{
+    e.preventDefault();
+    fileInput.files = e.dataTransfer.files;
+    fileName.innerText = fileInput.files[0].name;
+});
 
 // AUTO EMAIL
 window.onload = () => {
