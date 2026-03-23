@@ -20,7 +20,14 @@ TRANSFER_STATE = {}
 agent_workload = {}
 
 # 🔥 MAP AGENT NAME → CHAT ID
-AGENT_CHAT_MAP = {}
+AGENT_CHAT_MAP = {
+    "Manu": "8363465972",
+    "Yash": "7664954283",
+    "marcel": "7689530513",
+    "ali": "5993053888",
+    
+
+}
 
 
 app = Flask(__name__, template_folder="templates")
@@ -229,6 +236,72 @@ def download_telegram_file(file_id):
         return None
 
 
+
+
+
+
+
+def send_telegram_file(file_path, ticket_id, name=None, email=None):
+    try:
+        token = os.getenv("TELEGRAM_BOT_TOKEN")
+
+        conn = get_db()
+        c = conn.cursor()
+
+        assigned = None
+        if ticket_id:
+            c.execute("SELECT assigned_to FROM tickets WHERE id=?", (ticket_id,))
+            row = c.fetchone()
+            assigned = row["assigned_to"] if row else None
+
+        conn.close()
+
+        ext = file_path.split(".")[-1].lower()
+
+        if ext in ["jpg","jpeg","png","gif","webp"]:
+            url = f"https://api.telegram.org/bot{token}/sendPhoto"
+            key = "photo"
+        elif ext in ["mp4","webm","ogg"]:
+            url = f"https://api.telegram.org/bot{token}/sendVideo"
+            key = "video"
+        else:
+            url = f"https://api.telegram.org/bot{token}/sendDocument"
+            key = "document"
+
+        # 🔥 BEFORE ASSIGNMENT → send to all
+        if not assigned:
+            chat_ids = os.getenv("TELEGRAM_CHAT_IDS", "").split(",")
+
+            for chat_id in chat_ids:
+                chat_id = chat_id.strip()
+                if not chat_id:
+                    continue
+
+                with open(file_path, "rb") as f:
+                    requests.post(
+                        url,
+                        data={"chat_id": chat_id},
+                        files={key: f},
+                        timeout=15
+                    )
+
+        # 🔥 AFTER ASSIGNMENT → only assigned agent
+        else:
+            chat_id = AGENT_CHAT_MAP.get(assigned)
+
+            if chat_id:
+                with open(file_path, "rb") as f:
+                    requests.post(
+                        url,
+                        data={"chat_id": chat_id},
+                        files={key: f},
+                        timeout=15
+                    )
+
+    except Exception as e:
+        print("❌ TELEGRAM FILE ERROR:", e)
+
+
 # ---------------- TELEGRAM RECEIVE ----------------
 @app.route('/telegram', methods=['POST'])
 def telegram_webhook():
@@ -241,8 +314,12 @@ def telegram_webhook():
         if "callback_query" in data:
             query = data["callback_query"]
             action = query["data"]
-            agent = query["from"]["first_name"]
-            chat_id = str(query["from"]["id"])
+
+            user = query["from"]
+
+            # 🔥 FIX: SAFE AGENT NAME
+            agent = (user.get("username") or user.get("first_name")).lower()
+            chat_id = str(user["id"])
 
             AGENT_CHAT_MAP[agent] = chat_id
 
@@ -274,24 +351,54 @@ def telegram_webhook():
                 conn.close()
                 return "ok"
 
-            # ---------------- TRANSFER (NOW WITH UI SIGNAL) ----------------
+            # ---------------- TRANSFER ----------------
             if action.startswith("transfer_"):
                 ticket_id = action.replace("transfer_", "")
 
-                # 🔥 SHOW "TRANSFERRING" IN CHAT IMMEDIATELY
                 socketio.emit("agent_transferring", {
                     "ticket_id": ticket_id,
                     "from": agent
                 }, room=ticket_id)
 
-                # 🔥 STORE STATE FOR MANUAL INPUT
-                TRANSFER_STATE[agent] = ticket_id
+                buttons = {"inline_keyboard": []}
 
-                send_telegram(
-                    f"🔁 Enter username to transfer ticket #{ticket_id}\n\nExample:\ntransfer: Jerry",
-                    ticket_id
+                for a in AGENT_CHAT_MAP.keys():
+                    if a == agent:
+                        continue
+
+                    # 🔥 FIX: SAFE CALLBACK FORMAT
+                    buttons["inline_keyboard"].append([
+                        {"text": a, "callback_data": f"transfer_to|{ticket_id}|{a}"}
+                    ])
+
+                token = os.getenv("TELEGRAM_BOT_TOKEN")
+
+                requests.post(
+                    f"https://api.telegram.org/bot{token}/sendMessage",
+                    json={
+                        "chat_id": chat_id,
+                        "text": f"🔁 Select agent to transfer ticket #{ticket_id}",
+                        "reply_markup": buttons
+                    }
                 )
 
+                return "ok"
+
+            # ---------------- TRANSFER SELECT ----------------
+            if action.startswith("transfer_to|"):
+                _, ticket_id, new_agent = action.split("|")
+
+                c.execute("UPDATE tickets SET assigned_to=? WHERE id=?", (new_agent, ticket_id))
+                conn.commit()
+
+                socketio.emit("agent_transfer", {
+                    "ticket_id": ticket_id,
+                    "to": new_agent
+                }, room=ticket_id)
+
+                send_telegram(f"🔁 Ticket #{ticket_id} → {new_agent}", ticket_id)
+
+                conn.close()
                 return "ok"
 
             # ---------------- CLOSE ----------------
@@ -322,7 +429,8 @@ def telegram_webhook():
 
         now = datetime.datetime.now().strftime('%H:%M')
 
-        agent = msg_obj.get("from", {}).get("first_name", "Agent")
+        user = msg_obj.get("from", {})
+        agent = (user.get("username") or user.get("first_name")).lower()
         chat_id = str(msg_obj.get("chat", {}).get("id"))
 
         AGENT_CHAT_MAP[agent] = chat_id
@@ -336,7 +444,7 @@ def telegram_webhook():
                 return "ok"
 
             ticket_id = TRANSFER_STATE.pop(agent)
-            new_agent = text.split("transfer:")[1].strip()
+            new_agent = text.split("transfer:")[1].strip().lower()
 
             if new_agent not in AGENT_CHAT_MAP:
                 send_telegram(f"❌ Agent '{new_agent}' not found")
@@ -475,7 +583,6 @@ def telegram_webhook():
         print("❌ TELEGRAM ERROR:", e)
 
     return "ok"
-
 # ---------------- CREATE ADMIN ----------------
 @app.route('/create-admin')
 def create_admin():
