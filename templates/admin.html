@@ -13,7 +13,6 @@ body {
     background:#f3f4f6;
 }
 
-/* NAV */
 .nav {
     width:70px;
     background:#111827;
@@ -24,7 +23,6 @@ body {
     font-size:20px;
 }
 
-/* SIDEBAR */
 .sidebar {
     width:320px;
     background:#1f2937;
@@ -41,14 +39,6 @@ body {
     border:none;
 }
 
-.filters {
-    display:flex;
-    justify-content:space-around;
-    padding:5px;
-}
-.filter { cursor:pointer; padding:4px 8px; }
-.active-filter { background:#2563eb; border-radius:5px; }
-
 .ticket-list { overflow-y:auto; flex:1; }
 
 .ticket {
@@ -60,7 +50,6 @@ body {
 .ticket:hover { background:#374151; }
 .active-ticket { background:#2563eb; }
 
-/* MAIN */
 .main {
     flex:1;
     display:flex;
@@ -73,12 +62,15 @@ body {
     border-bottom:1px solid #ddd;
     display:flex;
     justify-content:space-between;
+    align-items:center;
 }
 
 .messages {
     flex:1;
     padding:20px;
     overflow-y:auto;
+    display:flex;
+    flex-direction:column;
 }
 
 .bubble {
@@ -94,6 +86,12 @@ body {
 .time {
     font-size:10px;
     opacity:0.6;
+}
+
+.bubble img, .bubble video {
+    max-width:250px;
+    border-radius:8px;
+    margin-top:5px;
 }
 
 .input-box {
@@ -112,6 +110,21 @@ input {
     background:#2563eb;
     color:white;
 }
+
+.controls {
+    display:flex;
+    gap:10px;
+}
+
+button {
+    cursor:pointer;
+    padding:6px 10px;
+    border:none;
+    border-radius:6px;
+}
+.close { background:#ef4444; color:white; }
+.open { background:#22c55e; color:white; }
+.upload { background:#2563eb; color:white; }
 </style>
 </head>
 
@@ -122,20 +135,15 @@ input {
 <div class="sidebar">
 
 <div class="search">
-    <input id="search" placeholder="Search..." oninput="filterTickets()">
-</div>
-
-<div class="filters">
-    <div class="filter" onclick="setFilter('all')">All</div>
-    <div class="filter" onclick="setFilter('open')">Open</div>
-    <div class="filter" onclick="setFilter('closed')">Closed</div>
+<input id="search" placeholder="Search..." oninput="filterTickets()">
 </div>
 
 <div id="ticketList" class="ticket-list">
 {% for t in tickets %}
-<div class="ticket" data-id="{{t[0]}}" data-status="{{t[4]}}">
-    <b>{{t[2]}}</b><br>
-    <small>{{t[1]}}</small>
+<div class="ticket" data-id="{{t[0]}}">
+<b>{{t[2]}}</b><br>
+<small>{{t[1]}}</small><br>
+<small>Status: {{t[4]}}</small>
 </div>
 {% endfor %}
 </div>
@@ -145,69 +153,58 @@ input {
 <div class="main">
 
 <div class="header">
-    <div id="ticketTitle">Select a ticket</div>
+<div id="ticketTitle">Select a ticket</div>
+
+<div class="controls">
+<button class="open" onclick="openTicket()">Open</button>
+<button class="close" onclick="closeTicket()">Close</button>
+<button class="upload" onclick="uploadFile()">📎</button>
+<input type="file" id="fileInput" hidden>
+</div>
+
 </div>
 
 <div id="messages" class="messages"></div>
 
 <div class="input-box">
-    <input id="messageInput" placeholder="Reply..." onkeypress="handleKey(event)">
-    <button class="send" onclick="sendReply()">Send</button>
+<input id="messageInput" placeholder="Reply..." onkeypress="handleKey(event)">
+<button class="send" onclick="sendReply()">Send</button>
 </div>
 
 </div>
 
 <script>
-
-// SAFE SOCKET
-let socket;
-try {
-    socket = io();
-} catch(e){
-    console.log("Socket failed:", e);
-}
-
+let socket = io();
 let currentTicket = null;
 
 const messagesEl = document.getElementById("messages");
 const titleEl = document.getElementById("ticketTitle");
 const inputEl = document.getElementById("messageInput");
+const fileInput = document.getElementById("fileInput");
 
-// 🔥 FIX: attach click AFTER render
+// CLICK TICKET
 document.querySelectorAll(".ticket").forEach(el=>{
     el.addEventListener("click", ()=>{
         loadTicket(el.dataset.id, el);
     });
 });
 
-// LOAD TICKET
+// LOAD
 function loadTicket(id, el){
     currentTicket = id;
+
+    socket.emit("join_ticket", { ticket_id:id });
 
     document.querySelectorAll(".ticket").forEach(t=>t.classList.remove("active-ticket"));
     el.classList.add("active-ticket");
 
     fetch(`/api/history/${id}`)
-    .then(res=>{
-        if(!res.ok){
-            throw new Error("API failed");
-        }
-        return res.json();
-    })
+    .then(res=>res.json())
     .then(data=>{
         messagesEl.innerHTML="";
         titleEl.innerText="Ticket: "+id;
 
-        if(!Array.isArray(data)){
-            console.error("Bad data", data);
-            return;
-        }
-
         data.forEach(m=>addMessage(m.message,m.sender,m.time));
-    })
-    .catch(err=>{
-        console.error("LOAD ERROR:", err);
-        alert("Failed to load ticket (check backend)");
     });
 }
 
@@ -215,11 +212,33 @@ function loadTicket(id, el){
 function addMessage(msg,sender,time=""){
     let div=document.createElement("div");
     div.className="bubble "+sender;
-    div.innerHTML=msg+"<div class='time'>"+time+"</div>";
+
+    if(msg.startsWith("[FILE]")){
+        let file = msg.replace("[FILE] ","");
+        let url = "/uploads/" + file;
+        let ext = file.split('.').pop().toLowerCase();
+
+        if(["jpg","jpeg","png","gif","webp"].includes(ext)){
+            div.innerHTML = `<img src="${url}">`;
+        }
+        else if(["mp4","webm","ogg"].includes(ext)){
+            div.innerHTML = `<video controls><source src="${url}"></video>`;
+        }
+        else{
+            div.innerHTML = `<a href="${url}" target="_blank">📎 ${file}</a>`;
+        }
+
+        div.innerHTML += `<br><a href="/download/${file}">⬇ Download</a>`;
+    } else {
+        div.innerText = msg;
+    }
+
+    div.innerHTML += `<div class="time">${time}</div>`;
     messagesEl.appendChild(div);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
-// SEND MESSAGE
+// SEND TEXT
 function sendReply(){
     let msg=inputEl.value.trim();
     if(!msg || !currentTicket){
@@ -227,46 +246,66 @@ function sendReply(){
         return;
     }
 
-    if(socket){
-        socket.emit('send_message',{
-            ticket_id:currentTicket,
-            sender:'admin',
-            message:msg
-        });
-    }
+    socket.emit('send_message',{
+        ticket_id:currentTicket,
+        sender:'admin',
+        message:msg
+    });
 
     addMessage(msg,'admin');
     inputEl.value="";
 }
 
+// UPLOAD FILE
+function uploadFile(){
+    if(!currentTicket){
+        alert("Select ticket first");
+        return;
+    }
+    fileInput.click();
+}
+
+fileInput.onchange = ()=>{
+    let file = fileInput.files[0];
+    if(!file) return;
+
+    let form = new FormData();
+    form.append("file", file);
+
+    fetch(`/upload/${currentTicket}`,{
+        method:"POST",
+        body:form
+    }).then(()=>{
+        addMessage("[FILE] "+file.name,"admin");
+    });
+};
+
+// CLOSE
+function closeTicket(){
+    if(!currentTicket) return;
+    fetch(`/close/${currentTicket}`);
+}
+
+// OPEN
+function openTicket(){
+    if(!currentTicket) return;
+    fetch(`/open/${currentTicket}`);
+}
+
 // SEARCH
 function filterTickets(){
     let q=document.getElementById("search").value.toLowerCase();
-
     document.querySelectorAll(".ticket").forEach(t=>{
         t.style.display = t.innerText.toLowerCase().includes(q) ? "block":"none";
     });
 }
 
-// FILTER
-function setFilter(status){
-    document.querySelectorAll(".ticket").forEach(t=>{
-        if(status==="all"){
-            t.style.display="block";
-        } else {
-            t.style.display = t.dataset.status===status ? "block":"none";
-        }
-    });
-}
-
 // REALTIME
-if(socket){
-    socket.on('new_message',data=>{
-        if(data.ticket_id===currentTicket){
-            addMessage(data.message,data.sender,data.time);
-        }
-    });
-}
+socket.on('new_message',data=>{
+    if(data.ticket_id===currentTicket){
+        addMessage(data.message,data.sender,data.time);
+    }
+});
 
 // ENTER
 function handleKey(e){
