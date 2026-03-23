@@ -101,16 +101,22 @@ def generate_ticket_id():
 def send_telegram(text):
     try:
         token = os.getenv("TELEGRAM_BOT_TOKEN")
-        chat_id = os.getenv("TELEGRAM_CHAT_ID")
 
-        if not token or not chat_id:
-            return
+        # 🔥 MULTIPLE ADMINS
+        chat_ids = os.getenv("TELEGRAM_CHAT_IDS", "").split(",")
 
-        requests.post(
-            f"https://api.telegram.org/bot{token}/sendMessage",
-            json={"chat_id": chat_id, "text": text},
-            timeout=10
-        )
+        for chat_id in chat_ids:
+            if not chat_id.strip():
+                continue
+
+            requests.post(
+                f"https://api.telegram.org/bot{token}/sendMessage",
+                json={
+                    "chat_id": chat_id.strip(),
+                    "text": text
+                },
+                timeout=10
+            )
 
     except Exception as e:
         print("❌ Telegram send error:", e)
@@ -120,7 +126,7 @@ def send_telegram(text):
 def send_telegram_with_buttons(text, ticket_id):
     try:
         token = os.getenv("TELEGRAM_BOT_TOKEN")
-        chat_id = os.getenv("TELEGRAM_CHAT_ID")
+        chat_ids = os.getenv("TELEGRAM_CHAT_IDS", "").split(",")
 
         buttons = {
             "inline_keyboard": [[
@@ -129,15 +135,19 @@ def send_telegram_with_buttons(text, ticket_id):
             ]]
         }
 
-        requests.post(
-            f"https://api.telegram.org/bot{token}/sendMessage",
-            json={
-                "chat_id": chat_id,
-                "text": text,
-                "reply_markup": buttons
-            },
-            timeout=10
-        )
+        for chat_id in chat_ids:
+            if not chat_id.strip():
+                continue
+
+            requests.post(
+                f"https://api.telegram.org/bot{token}/sendMessage",
+                json={
+                    "chat_id": chat_id.strip(),
+                    "text": text,
+                    "reply_markup": buttons
+                },
+                timeout=10
+            )
 
     except Exception as e:
         print("❌ BUTTON ERROR:", e)
@@ -179,7 +189,7 @@ def download_telegram_file(file_id):
 def send_telegram_file(file_path, ticket_id, name="User", email=""):
     try:
         token = os.getenv("TELEGRAM_BOT_TOKEN")
-        chat_id = os.getenv("TELEGRAM_CHAT_ID")
+        chat_ids = os.getenv("TELEGRAM_CHAT_IDS", "").split(",")
 
         ext = file_path.split(".")[-1].lower()
 
@@ -200,13 +210,17 @@ Email: {email}
             url = f"https://api.telegram.org/bot{token}/sendDocument"
             key = "document"
 
-        with open(file_path, "rb") as f:
-            requests.post(
-                url,
-                data={"chat_id": chat_id, "caption": caption},
-                files={key: f},
-                timeout=15
-            )
+        for chat_id in chat_ids:
+            if not chat_id.strip():
+                continue
+
+            with open(file_path, "rb") as f:
+                requests.post(
+                    url,
+                    data={"chat_id": chat_id.strip(), "caption": caption},
+                    files={key: f},
+                    timeout=15
+                )
 
     except Exception as e:
         print("❌ TELEGRAM FILE ERROR:", e)
@@ -228,31 +242,36 @@ def telegram_webhook():
         if not msg_obj:
             return "ok"
 
+        now = datetime.datetime.now().strftime('%H:%M')
+
+        # 🔥 GET ADMIN NAME FROM TELEGRAM (username or fallback)
+        agent_name = msg_obj.get("from", {}).get("first_name", "Agent")
+
         # ---------------- IMAGE ----------------
         if "photo" in msg_obj:
             file_id = msg_obj["photo"][-1]["file_id"]
             filename = download_telegram_file(file_id)
 
-            ticket_id = extract_id(msg_obj.get("caption",""))
+            ticket_id = extract_id(msg_obj.get("caption", ""))
             if not ticket_id:
                 send_telegram("❌ Use: #123456")
                 return "ok"
 
-            now = datetime.datetime.now().strftime('%H:%M')
-
             conn = get_db()
             c = conn.cursor()
+
             c.execute("INSERT INTO messages VALUES (NULL,?,?,?,?)",
-                      (ticket_id,"admin",f"[FILE] {filename}",now))
+                      (ticket_id, "admin", f"[FILE] {filename}", now))
+
             conn.commit()
             conn.close()
 
-            # 🔥 FIX: SEND TO ROOM (NOT BROADCAST)
-            socketio.emit('new_message',{
-                "ticket_id":ticket_id,
-                "message":f"[FILE] {filename}",
-                "sender":"admin",
-                "time":now
+            socketio.emit('new_message', {
+                "ticket_id": ticket_id,
+                "message": f"[FILE] {filename}",
+                "sender": "admin",
+                "time": now,
+                "agent": agent_name
             }, room=ticket_id)
 
             send_telegram(f"📷 Sent to #{ticket_id}")
@@ -263,32 +282,33 @@ def telegram_webhook():
             file_id = msg_obj["video"]["file_id"]
             filename = download_telegram_file(file_id)
 
-            ticket_id = extract_id(msg_obj.get("caption",""))
+            ticket_id = extract_id(msg_obj.get("caption", ""))
             if not ticket_id:
                 send_telegram("❌ Use: #123456")
                 return "ok"
 
-            now = datetime.datetime.now().strftime('%H:%M')
-
             conn = get_db()
             c = conn.cursor()
+
             c.execute("INSERT INTO messages VALUES (NULL,?,?,?,?)",
-                      (ticket_id,"admin",f"[FILE] {filename}",now))
+                      (ticket_id, "admin", f"[FILE] {filename}", now))
+
             conn.commit()
             conn.close()
 
-            socketio.emit('new_message',{
-                "ticket_id":ticket_id,
-                "message":f"[FILE] {filename}",
-                "sender":"admin",
-                "time":now
+            socketio.emit('new_message', {
+                "ticket_id": ticket_id,
+                "message": f"[FILE] {filename}",
+                "sender": "admin",
+                "time": now,
+                "agent": agent_name
             }, room=ticket_id)
 
             send_telegram(f"🎥 Sent to #{ticket_id}")
             return "ok"
 
         # ---------------- TEXT ----------------
-        text = msg_obj.get("text","").strip()
+        text = msg_obj.get("text", "").strip()
 
         match = re.match(r"#?\s*(\d+)\s*:\s*(.+)", text)
         if not match:
@@ -298,23 +318,24 @@ def telegram_webhook():
         ticket_id = str(match.group(1)).strip()
         msg = match.group(2).strip()
 
-        now = datetime.datetime.now().strftime('%H:%M')
-
         send_telegram(f"💬 Sent to #{ticket_id}")
 
         conn = get_db()
         c = conn.cursor()
+
         c.execute("INSERT INTO messages VALUES (NULL,?,?,?,?)",
-                  (ticket_id,"admin",msg,now))
+                  (ticket_id, "admin", msg, now))
+
         conn.commit()
         conn.close()
 
-        socketio.emit('new_message',{
-            "ticket_id":ticket_id,
-            "message":msg,
-            "sender":"admin",
-            "time":now
-        }, room=ticket_id)   # 🔥 FIX HERE
+        socketio.emit('new_message', {
+            "ticket_id": ticket_id,
+            "message": msg,
+            "sender": "admin",
+            "time": now,
+            "agent": agent_name   # 🔥 REAL AGENT NAME
+        }, room=ticket_id)
 
     except Exception as e:
         print("❌ TELEGRAM ERROR:", e)
@@ -465,10 +486,11 @@ def upload_file(ticket_id):
 def close_ticket(ticket_id):
     conn = get_db()
     c = conn.cursor()
-
     c.execute("UPDATE tickets SET status='closed' WHERE id=?", (ticket_id,))
     conn.commit()
     conn.close()
+
+    socketio.emit("ticket_closed", {}, room=ticket_id)
 
     return "ok"
 
@@ -630,47 +652,95 @@ def admin_stats():
 # ---------------- SOCKET ----------------
 @socketio.on('send_message')
 def handle_message(data):
+    try:
+        now = datetime.datetime.now().strftime('%H:%M')
+        ticket_id = str(data.get('ticket_id', '')).strip()
+        sender = data.get('sender', 'user')
+        message = data.get('message', '').strip()
 
-    now = datetime.datetime.now().strftime('%H:%M')
-    ticket_id = str(data['ticket_id']).strip()
+        if not ticket_id or not message:
+            return
 
-    conn = get_db()
-    c = conn.cursor()
+        # 🔥 GET AGENT NAME (REAL ADMIN)
+        agent_name = session.get("admin", "Agent") if sender == "admin" else "User"
 
-    c.execute(
-        "INSERT INTO messages VALUES (NULL, ?, ?, ?, ?)",
-        (ticket_id, data['sender'], data['message'], now)
-    )
+        # ---------------- SAVE MESSAGE ----------------
+        conn = get_db()
+        c = conn.cursor()
 
-    conn.commit()
-    conn.close()
+        c.execute(
+            "INSERT INTO messages VALUES (NULL, ?, ?, ?, ?)",
+            (ticket_id, sender, message, now)
+        )
 
-    # 🔥 TELEGRAM SEND (UNCHANGED)
-    send_telegram(f"""
+        conn.commit()
+        conn.close()
+
+        # ---------------- TELEGRAM SEND ----------------
+        try:
+            send_telegram(f"""
 💬 Message
 
 Ticket: #{ticket_id}
-From: {data['sender']}
+From: {agent_name}
 
-{data['message']}
+{message}
 """)
+        except:
+            pass
 
-    # 🔥 SEND FILE IF MESSAGE IS FILE
-    if data['message'].startswith("[FILE]"):
-        filename = data['message'].replace("[FILE] ", "")
-        file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        send_telegram_file(file_path, ticket_id)
+        # ---------------- FILE SEND ----------------
+        if message.startswith("[FILE]"):
+            filename = message.replace("[FILE] ", "").strip()
+            file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
 
-    # ✅ SEND MESSAGE TO ROOM (REALTIME FIX)
-    socketio.emit('new_message', {
-        "ticket_id": ticket_id,
-        "message": data['message'],
-        "sender": data['sender'],
+            if os.path.exists(file_path):
+                send_telegram_file(file_path, ticket_id)
+
+        # ---------------- REALTIME MESSAGE ----------------
+        socketio.emit('new_message', {
+            "ticket_id": ticket_id,
+            "message": message,
+            "sender": sender,
+            "time": now,
+            "agent": agent_name   # 🔥 IMPORTANT (frontend uses this)
+        }, room=ticket_id)
+
+        # ---------------- DELIVERY STATUS ----------------
+        socketio.emit('delivered', {
+            "ticket_id": ticket_id
+        }, room=ticket_id)
+
+    except Exception as e:
+        print("❌ SOCKET ERROR:", e)
+
+@socketio.on('agent_join')
+def agent_join(data):
+    ticket_id = str(data.get('ticket_id')).strip()
+    agent_name = session.get("admin", "Agent")
+    now = datetime.datetime.now().strftime('%d %b %Y, %I:%M %p')
+
+    socketio.emit('agent_join', {
+        "agent": agent_name,
         "time": now
     }, room=ticket_id)
 
-    # ✅ 🔥 DELIVERED STATUS
-    socketio.emit('delivered', {}, room=ticket_id)
+@socketio.on('agent_leave')
+def agent_leave(data):
+    ticket_id = str(data.get('ticket_id')).strip()
+    agent_name = session.get("admin", "Agent")
+    now = datetime.datetime.now().strftime('%d %b %Y, %I:%M %p')
+
+    socketio.emit('agent_leave', {
+        "agent": agent_name,
+        "time": now
+    }, room=ticket_id)
+
+
+
+@socketio.on("agent_transfer")
+def agent_transfer(data):
+    socketio.emit("agent_transfer", data, room=data["ticket_id"])
 
 
 # ---------------- JOIN ROOM ----------------
@@ -684,17 +754,21 @@ def join_ticket(data):
 # ---------------- TYPING ----------------
 @socketio.on('typing')
 def typing(data):
-    ticket_id = str(data['ticket_id']).strip()
+    ticket_id = str(data.get('ticket_id')).strip()
+    agent_name = session.get("admin", "Agent")
 
-    socketio.emit('typing', {}, room=ticket_id, include_self=False)
-
+    socketio.emit('typing', {
+        "agent": agent_name
+    }, room=ticket_id, include_self=False)
 
 # ---------------- SEEN ----------------
 @socketio.on('seen')
 def seen(data):
-    ticket_id = str(data['ticket_id']).strip()
+    ticket_id = str(data.get('ticket_id')).strip()
 
-    socketio.emit('seen', {}, room=ticket_id)
+    socketio.emit('seen', {
+        "ticket_id": ticket_id
+    }, room=ticket_id)
 
 # ---------------- RUN ----------------
 if __name__ == '__main__':

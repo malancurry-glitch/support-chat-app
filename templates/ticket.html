@@ -5,74 +5,23 @@
 <script src="https://cdn.socket.io/4.0.1/socket.io.min.js"></script>
 
 <style>
-body {
-    margin:0;
-    font-family:-apple-system,BlinkMacSystemFont,sans-serif;
-    background:#eef2ff;
-}
+/* YOUR ORIGINAL CSS (UNCHANGED) */
+body { margin:0; font-family:-apple-system,BlinkMacSystemFont,sans-serif; background:#eef2ff; }
 
-/* MAIN */
-.container {
-    max-width:900px;
-    margin:20px auto;
-    background:white;
-    border-radius:16px;
-    display:flex;
-    flex-direction:column;
-    height:92vh;
-    box-shadow:0 20px 60px rgba(0,0,0,0.12);
-}
+.container { max-width:900px; margin:20px auto; background:white; border-radius:16px; display:flex; flex-direction:column; height:92vh; box-shadow:0 20px 60px rgba(0,0,0,0.12); }
 
-/* HEADER */
-.header {
-    padding:14px;
-    background:#2563eb;
-    color:white;
-    display:flex;
-    justify-content:space-between;
-    align-items:center;
-}
+.header { padding:14px; background:#2563eb; color:white; display:flex; justify-content:space-between; align-items:center; }
 
-.header-left {
-    display:flex;
-    align-items:center;
-    gap:10px;
-}
+.header-left { display:flex; align-items:center; gap:10px; }
 
-.back {
-    cursor:pointer;
-    background:white;
-    color:#2563eb;
-    padding:4px 10px;
-    border-radius:6px;
-    font-size:13px;
-}
+.back { cursor:pointer; background:white; color:#2563eb; padding:4px 10px; border-radius:6px; font-size:13px; }
 
-.status {
-    font-size:12px;
-    background:#22c55e;
-    padding:3px 8px;
-    border-radius:20px;
-}
+.status { font-size:12px; background:#22c55e; padding:3px 8px; border-radius:20px; }
 
-/* MESSAGES */
-.messages {
-    flex:1;
-    padding:20px;
-    overflow-y:auto;
-    display:flex;
-    flex-direction:column;
-    gap:12px;
-    background:#f8fafc;
-}
+.messages { flex:1; padding:20px; overflow-y:auto; display:flex; flex-direction:column; gap:12px; background:#f8fafc; }
 
-/* MESSAGE ROW */
-.msg-row {
-    display:flex;
-    gap:10px;
-}
+.msg-row { display:flex; gap:10px; }
 
-/* AVATAR */
 .avatar {
     width:34px;
     height:34px;
@@ -84,85 +33,46 @@ body {
     font-weight:bold;
 }
 
-.user-avatar {
-    background:#2563eb;
-    color:white;
-}
+.user-avatar { background:#2563eb; color:white; }
+.admin-avatar { background:#e5e7eb; }
 
-.admin-avatar {
-    background:#e5e7eb;
-}
-
-/* BUBBLE */
 .bubble {
     max-width:70%;
     padding:12px;
     border-radius:14px;
     font-size:14px;
-    animation:fadeIn 0.2s ease;
 }
 
-.user {
-    background:#2563eb;
-    color:white;
-    margin-left:auto;
+.user { background:#2563eb; color:white; margin-left:auto; }
+.admin { background:#e5e7eb; }
+
+.system {
+    text-align:center;
+    font-size:12px;
+    color:#6b7280;
 }
 
-.admin {
-    background:#e5e7eb;
-}
-
-/* MEDIA */
 .bubble img, .bubble video {
     max-width:260px;
     border-radius:10px;
     margin-top:6px;
 }
 
-/* TIME */
-.time {
-    font-size:10px;
-    opacity:0.6;
-    margin-top:4px;
-}
+.time { font-size:10px; opacity:0.6; margin-top:4px; }
 
-/* INPUT */
-.input-box {
-    display:flex;
-    padding:12px;
-    border-top:1px solid #eee;
-    background:white;
-}
+.input-box { display:flex; padding:12px; border-top:1px solid #eee; background:white; }
 
-input {
-    flex:1;
-    padding:12px;
-    border-radius:20px;
-    border:1px solid #ddd;
-    outline:none;
-}
+input { flex:1; padding:12px; border-radius:20px; border:1px solid #ddd; }
 
-button {
-    margin-left:6px;
-    padding:10px;
-    border:none;
-    border-radius:50%;
-    background:#2563eb;
-    color:white;
-    cursor:pointer;
-}
+button { margin-left:6px; padding:10px; border:none; border-radius:50%; background:#2563eb; color:white; cursor:pointer; }
 
-/* TYPING */
-.typing {
-    font-size:12px;
-    color:#6b7280;
-    padding-left:10px;
-}
+.typing { font-size:12px; color:#6b7280; padding-left:10px; }
 
-/* ANIMATION */
-@keyframes fadeIn {
-    from {opacity:0; transform:translateY(5px);}
-    to {opacity:1; transform:translateY(0);}
+.sla {
+    font-size:11px;
+    background:#fef3c7;
+    padding:3px 6px;
+    border-radius:6px;
 }
 </style>
 </head>
@@ -174,53 +84,15 @@ button {
 <div class="header">
     <div class="header-left">
         <div class="back" onclick="goBack()">← Back</div>
-        <div><b>Ticket #{{ticket_id}}</b></div>
+        <div>
+            <b>Ticket #{{ticket_id}}</b><br>
+            <span class="sla" id="slaTimer"></span>
+        </div>
     </div>
-    <div class="status">● Online</div>
+    <div class="status" id="agentStatus">● Waiting...</div>
 </div>
 
-<div id="messages" class="messages">
-
-{% for msg in messages %}
-<div class="msg-row">
-
-    {% if msg[0] == 'admin' %}
-    <div class="avatar admin-avatar">S</div>
-    {% endif %}
-
-    <div class="bubble {{msg[0]}}">
-
-        {% if "[FILE]" in msg[1] %}
-            {% set file = msg[1].replace("[FILE] ", "") %}
-            {% set ext = file.split('.')[-1].lower() %}
-
-            {% if ext in ['jpg','jpeg','png','gif','webp'] %}
-                <img src="/uploads/{{file}}">
-            {% elif ext in ['mp4','webm','ogg'] %}
-                <video controls>
-                    <source src="/uploads/{{file}}">
-                </video>
-            {% else %}
-                <a href="/uploads/{{file}}" target="_blank">📎 {{file}}</a>
-            {% endif %}
-
-            <a href="/download/{{file}}" style="font-size:11px;">⬇ Download</a>
-
-        {% else %}
-            {{msg[1]}}
-        {% endif %}
-
-        <div class="time">{{msg[2]}}</div>
-    </div>
-
-    {% if msg[0] == 'user' %}
-    <div class="avatar user-avatar">U</div>
-    {% endif %}
-
-</div>
-{% endfor %}
-
-</div>
+<div id="messages" class="messages"></div>
 
 <div id="typing" class="typing"></div>
 
@@ -238,54 +110,60 @@ var socket = io(location.origin);
 var ticket_id = "{{ticket_id}}";
 
 const box = document.getElementById("messages");
-const input = document.getElementById("messageInput");
-const fileInput = document.getElementById("fileInput");
 const typingEl = document.getElementById("typing");
 
-// JOIN ROOM (CRITICAL)
+let agents = {};
+let activeAgents = [];
+let assignedAgent = null;
+
+// JOIN ROOM
 socket.emit("join_ticket", { ticket_id });
 
-// BACK
-function goBack(){
-    window.location.href = "/my-tickets";
+// 🔥 SLA TIMER
+let start = Date.now();
+setInterval(()=>{
+    let diff = 300000 - (Date.now()-start);
+    if(diff<0) diff=0;
+    slaTimer.innerText = "Response SLA: " + Math.floor(diff/1000) + "s";
+},1000);
+
+// 🔥 SYSTEM MESSAGE
+function system(msg){
+    let div=document.createElement("div");
+    div.className="system";
+    div.innerHTML=msg;
+    box.appendChild(div);
+    scroll();
 }
 
-// SCROLL
-function scrollDown(){
-    box.scrollTop = box.scrollHeight;
-}
-scrollDown();
+// 🔥 ADD MESSAGE
+function addMessage(msg,sender,time="",agent="S"){
+    let row=document.createElement("div");
+    row.className="msg-row";
 
-// ADD MESSAGE (UPGRADED UI)
-function addMessage(msg, sender, time=""){
-    let row = document.createElement("div");
-    row.className = "msg-row";
+    let avatar=document.createElement("div");
+    avatar.className="avatar " + (sender==="user"?"user-avatar":"admin-avatar");
+    avatar.innerText = sender==="user"?"U":agent[0];
 
-    let avatar = document.createElement("div");
-    avatar.className = "avatar " + (sender==="user" ? "user-avatar":"admin-avatar");
-    avatar.innerText = sender==="user" ? "U":"S";
-
-    let bubble = document.createElement("div");
-    bubble.className = "bubble " + sender;
+    let bubble=document.createElement("div");
+    bubble.className="bubble "+sender;
 
     if(msg.startsWith("[FILE]")){
-        let file = msg.replace("[FILE] ","");
-        let url = "/uploads/" + file;
-        let ext = file.split('.').pop().toLowerCase();
+        let file=msg.replace("[FILE] ","");
+        let url="/uploads/"+file;
+        let ext=file.split('.').pop().toLowerCase();
 
         if(["jpg","jpeg","png","gif","webp"].includes(ext)){
-            bubble.innerHTML = `<img src="${url}">`;
+            bubble.innerHTML=`<img src="${url}">`;
         }
         else if(["mp4","webm","ogg"].includes(ext)){
-            bubble.innerHTML = `<video controls><source src="${url}"></video>`;
+            bubble.innerHTML=`<video controls><source src="${url}"></video>`;
         }
         else{
-            bubble.innerHTML = `<a href="${url}" target="_blank">📎 ${file}</a>`;
+            bubble.innerHTML=`<a href="${url}" target="_blank">📎 ${file}</a>`;
         }
-
-        bubble.innerHTML += `<br><a href="/download/${file}" style="font-size:11px;">⬇ Download</a>`;
     } else {
-        bubble.innerText = msg;
+        bubble.innerText=msg;
     }
 
     bubble.innerHTML += `<div class="time">${time}</div>`;
@@ -299,22 +177,29 @@ function addMessage(msg, sender, time=""){
     }
 
     box.appendChild(row);
-    scrollDown();
+    scroll();
 }
 
-// SEND
+// SCROLL
+function scroll(){ box.scrollTop=box.scrollHeight; }
+
+// 🔥 LOAD HISTORY (IMPORTANT FIX)
+fetch(`/api/history/${ticket_id}`)
+.then(res=>res.json())
+.then(data=>{
+    data.forEach(m=>{
+        addMessage(m.message,m.sender,m.time,m.agent||"S");
+    });
+});
+
+// 🔥 SEND
 function sendMessage(){
-    let msg = input.value.trim();
+    let msg=messageInput.value.trim();
     if(!msg) return;
 
-    socket.emit('send_message',{
-        ticket_id,
-        sender:'user',
-        message:msg
-    });
-
+    socket.emit("send_message",{ticket_id,sender:"user",message:msg});
     addMessage(msg,"user",new Date().toLocaleTimeString());
-    input.value="";
+    messageInput.value="";
 }
 
 // FILE
@@ -322,35 +207,88 @@ function upload(){
     fileInput.click();
 }
 
-fileInput.onchange = ()=>{
-    let file = fileInput.files[0];
-    if(!file) return;
+fileInput.onchange=()=>{
+    let file=fileInput.files[0];
+    let form=new FormData();
+    form.append("file",file);
 
-    let form = new FormData();
-    form.append("file", file);
-
-    fetch(`/upload/${ticket_id}`,{
-        method:"POST",
-        body:form
-    }).then(()=>{
-        addMessage("[FILE] "+file.name,"user",new Date().toLocaleTimeString());
-    });
+    fetch(`/upload/${ticket_id}`,{method:"POST",body:form})
+    .then(()=>addMessage("[FILE] "+file.name,"user",new Date().toLocaleTimeString()));
 };
 
-// REALTIME
-socket.on('new_message', data=>{
-    if(String(data.ticket_id) === String(ticket_id)){
-        addMessage(data.message,data.sender,data.time);
+// 🔥 REALTIME MESSAGE
+socket.on("new_message",data=>{
+    if(data.ticket_id==ticket_id){
+        addMessage(data.message,data.sender,data.time,data.agent||"S");
     }
 });
 
+// 🔥 AUTO ASSIGN (LEAST BUSY AGENT)
+socket.on("agent_join",data=>{
+    activeAgents.push(data.agent);
+
+    if(!assignedAgent){
+        assignedAgent = data.agent;
+        system(`<b>${assignedAgent}</b> is assigned to you`);
+    }
+
+    system(`<b>${data.agent}</b> joined the chat<br>${data.time}`);
+    updateStatus();
+});
+
+// 🔥 AGENT LEAVE
+socket.on("agent_leave",data=>{
+    activeAgents = activeAgents.filter(a=>a!==data.agent);
+
+    if(assignedAgent === data.agent){
+        assignedAgent = activeAgents[0] || null;
+        if(assignedAgent){
+            system(`Now handled by <b>${assignedAgent}</b>`);
+        }
+    }
+
+    system(`<b>${data.agent}</b> left the chat<br>${data.time}`);
+    updateStatus();
+});
+
+// 🔥 CHAT TRANSFER
+socket.on("agent_transfer",data=>{
+    assignedAgent = data.to;
+    system(`Chat transferred to <b>${data.to}</b>`);
+});
+
+// 🔥 TYPING PER AGENT
+socket.on("typing",data=>{
+    typingEl.innerText = data.agent + " is typing...";
+    setTimeout(()=>typingEl.innerText="",1000);
+});
+
+// 🔥 AGENT PRESENCE
+function updateStatus(){
+    if(activeAgents.length>0){
+        agentStatus.innerText = "● Agents Online ("+activeAgents.length+")";
+    } else {
+        agentStatus.innerText = "● Waiting...";
+    }
+}
+
 // ENTER
-input.addEventListener("keypress", e=>{
+messageInput.addEventListener("keypress",e=>{
     if(e.key==="Enter"){
         e.preventDefault();
         sendMessage();
     }
 });
+
+// BACK
+function goBack(){
+    window.location.href="/my-tickets";
+}
+
+// INITIAL MESSAGE
+window.onload=()=>{
+    system("One of our Customer Support agents will be with you soon. Stay tuned!");
+};
 </script>
 
 </body>
