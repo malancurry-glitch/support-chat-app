@@ -222,17 +222,18 @@ socket.on("new_message",data=>{
 
 // 🔥 AUTO ASSIGN FIRST AGENT (QUEUE SYSTEM)
 socket.on("agent_join",data=>{
-    if(!activeAgents.includes(data.agent)){
-        activeAgents.push(data.agent);
-    }
+    activeAgents.push(data.agent);
 
     if(!assignedAgent){
         assignedAgent = data.agent;
-        system(`<b>${assignedAgent}</b> is now handling your request`);
+
+        system(`<b>${assignedAgent}</b> is assigned to you`);
+
+        document.getElementById("agentStatus").innerText =
+            "● Assigned to " + assignedAgent;
     }
 
     system(`<b>${data.agent}</b> joined the chat<br>${data.time}`);
-    updateStatus();
 });
 
 // 🔥 AGENT LEAVE
@@ -293,6 +294,16 @@ function goBack(){
 window.onload=()=>{
     system("One of our Customer Support agents will be with you soon. Stay tuned!");
 };
+socket.on("assigned", data=>{
+    if(data.ticket_id == ticket_id){
+        assignedAgent = data.agent;
+
+        system(`<b>${assignedAgent}</b> is assigned to your ticket`);
+
+        document.getElementById("agentStatus").innerText =
+            "● Assigned to " + assignedAgent;
+    }
+});
 </script>
 
 </body>

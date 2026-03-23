@@ -372,6 +372,9 @@ socket.on('new_message',data=>{
 function handleKey(e){
     if(e.key==="Enter") sendReply();
 }
+socket.on("blocked", data=>{
+    alert(data.message);
+});
 </script>
 
 </body>
