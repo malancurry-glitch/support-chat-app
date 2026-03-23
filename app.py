@@ -94,15 +94,11 @@ def send_telegram(text):
             print("⚠️ Telegram not configured")
             return
 
-        res = requests.post(
+        requests.post(
             f"https://api.telegram.org/bot{token}/sendMessage",
-            json={
-                "chat_id": chat_id,
-                "text": text
-            }
+            json={"chat_id": chat_id, "text": text},
+            timeout=10
         )
-
-        print("📤 TEXT SENT:", res.status_code)
 
     except Exception as e:
         print("❌ Telegram send error:", e)
@@ -114,10 +110,6 @@ def send_telegram_with_buttons(text, ticket_id):
         token = os.getenv("TELEGRAM_BOT_TOKEN")
         chat_id = os.getenv("TELEGRAM_CHAT_ID")
 
-        if not token or not chat_id:
-            print("⚠️ Telegram not configured")
-            return
-
         buttons = {
             "inline_keyboard": [
                 [
@@ -127,16 +119,15 @@ def send_telegram_with_buttons(text, ticket_id):
             ]
         }
 
-        res = requests.post(
+        requests.post(
             f"https://api.telegram.org/bot{token}/sendMessage",
             json={
                 "chat_id": chat_id,
                 "text": text,
                 "reply_markup": buttons
-            }
+            },
+            timeout=10
         )
-
-        print("📤 BUTTON MESSAGE SENT:", res.status_code)
 
     except Exception as e:
         print("❌ BUTTON ERROR:", e)
@@ -149,25 +140,22 @@ def download_telegram_file(file_id):
 
         file_info = requests.get(
             f"https://api.telegram.org/bot{token}/getFile",
-            params={"file_id": file_id}
+            params={"file_id": file_id},
+            timeout=10
         ).json()
 
         if not file_info.get("ok"):
-            print("❌ TELEGRAM FILE ERROR:", file_info)
             return None
 
         file_path = file_info["result"]["file_path"]
-
         file_url = f"https://api.telegram.org/file/bot{token}/{file_path}"
-        file_data = requests.get(file_url).content
 
+        content = requests.get(file_url, timeout=10).content
         filename = file_path.split("/")[-1]
-        save_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
 
-        with open(save_path, "wb") as f:
-            f.write(file_data)
-
-        print("📥 FILE DOWNLOADED:", filename)
+        path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        with open(path, "wb") as f:
+            f.write(content)
 
         return filename
 
@@ -182,13 +170,8 @@ def send_telegram_file(file_path, ticket_id, name="User", email=""):
         token = os.getenv("TELEGRAM_BOT_TOKEN")
         chat_id = os.getenv("TELEGRAM_CHAT_ID")
 
-        if not token or not chat_id:
-            print("⚠️ Telegram not configured")
-            return
-
         ext = file_path.split(".")[-1].lower()
 
-        # 🔥 IMPROVED CAPTION (includes NAME)
         caption = f"""📎 File from ticket
 
 #{ticket_id}
@@ -196,7 +179,6 @@ Name: {name}
 Email: {email}
 """
 
-        # 🔥 DETECT FILE TYPE
         if ext in ["jpg","jpeg","png","gif","webp"]:
             url = f"https://api.telegram.org/bot{token}/sendPhoto"
             key = "photo"
@@ -208,16 +190,12 @@ Email: {email}
             key = "document"
 
         with open(file_path, "rb") as f:
-            res = requests.post(
+            requests.post(
                 url,
-                data={
-                    "chat_id": chat_id,
-                    "caption": caption
-                },
-                files={key: f}
+                data={"chat_id": chat_id, "caption": caption},
+                files={key: f},
+                timeout=15
             )
-
-        print("📤 FILE SENT:", res.status_code)
 
     except Exception as e:
         print("❌ TELEGRAM FILE ERROR:", e)
@@ -227,178 +205,111 @@ Email: {email}
 @app.route('/telegram', methods=['POST'])
 def telegram_webhook():
     try:
+        import re
+
         data = request.get_json(force=True)
-        print("📩 TELEGRAM RECEIVED:", data)
 
-        # ✅ HANDLE BUTTON CLICK FIRST
-        if "callback_query" in data:
-            query = data["callback_query"]
-            action = query["data"]
+        # helper
+        def extract_id(text):
+            m = re.search(r"#?\s*(\d+)", text)
+            return m.group(1) if m else None
 
-            print("BUTTON CLICK:", action)
-
-            if action.startswith("close_"):
-                ticket_id = action.replace("close_", "")
-
-                conn = get_db()
-                c = conn.cursor()
-                c.execute("UPDATE tickets SET status='closed' WHERE id=?", (ticket_id,))
-                conn.commit()
-                conn.close()
-
-                send_telegram(f"🔒 Ticket {ticket_id} closed")
-
-            return "ok"
-
-        # ⬇️ THEN YOUR NORMAL MESSAGE LOGIC
-        msg_obj = (
-            data.get("message")
-            or data.get("edited_message")
-            or data.get("channel_post")
-        )
-
+        msg_obj = data.get("message") or data.get("edited_message")
         if not msg_obj:
-            print("❌ No message object")
             return "ok"
 
-        # ---------------- 📸 IMAGE ----------------
+        # ---------------- IMAGE ----------------
         if "photo" in msg_obj:
             file_id = msg_obj["photo"][-1]["file_id"]
             filename = download_telegram_file(file_id)
 
-            if filename:
-                caption = msg_obj.get("caption", "").strip()
+            ticket_id = extract_id(msg_obj.get("caption",""))
+            if not ticket_id:
+                send_telegram("❌ Use: #123456")
+                return "ok"
 
-                # 🔥 FIX: allow no colon
-                ticket_id = caption.replace(":", "").strip()
+            now = datetime.datetime.now().strftime('%H:%M')
 
-                if not ticket_id.startswith("#-"):
-                    send_telegram("❌ Send like:\n#123456 (in caption)")
-                    return "ok"
+            conn = get_db()
+            c = conn.cursor()
+            c.execute("INSERT INTO messages VALUES (NULL,?,?,?,?)",
+                      (ticket_id,"admin",f"[FILE] {filename}",now))
+            conn.commit()
+            conn.close()
 
-                now = datetime.datetime.now().strftime('%H:%M')
+            socketio.emit('new_message',{
+                "ticket_id":ticket_id,
+                "message":f"[FILE] {filename}",
+                "sender":"admin",
+                "time":now
+            }, broadcast=True)
 
-                conn = get_db()
-                c = conn.cursor()
-                c.execute(
-                    "INSERT INTO messages VALUES (NULL, ?, ?, ?, ?)",
-                    (ticket_id, "admin", f"[FILE] {filename}", now)
-                )
-                conn.commit()
-                conn.close()
-
-                socketio.emit('new_message', {
-                    "ticket_id": ticket_id,
-                    "message": f"[FILE] {filename}",
-                    "sender": "admin",
-                    "time": now
-                })
-
-                send_telegram(f"📷 Image received → {ticket_id}")
-
+            send_telegram(f"📷 Sent to #{ticket_id}")
             return "ok"
 
-
-        # ---------------- 🎥 VIDEO ----------------
+        # ---------------- VIDEO ----------------
         if "video" in msg_obj:
             file_id = msg_obj["video"]["file_id"]
             filename = download_telegram_file(file_id)
 
-            if filename:
-                caption = msg_obj.get("caption", "").strip()
-                ticket_id = caption.replace(":", "").strip()
+            ticket_id = extract_id(msg_obj.get("caption",""))
+            if not ticket_id:
+                send_telegram("❌ Use: #123456")
+                return "ok"
 
-                if not ticket_id.startswith("#-"):
-                    send_telegram("❌ Send like:\n#123456 (in caption)")
-                    return "ok"
-
-                now = datetime.datetime.now().strftime('%H:%M')
-
-                conn = get_db()
-                c = conn.cursor()
-                c.execute(
-                    "INSERT INTO messages VALUES (NULL, ?, ?, ?, ?)",
-                    (ticket_id, "admin", f"[FILE] {filename}", now)
-                )
-                conn.commit()
-                conn.close()
-
-                socketio.emit('new_message', {
-                    "ticket_id": ticket_id,
-                    "message": f"[FILE] {filename}",
-                    "sender": "admin",
-                    "time": now
-                })
-
-                send_telegram(f"🎥 Video received → {ticket_id}")
-
-            return "ok"
-
-
-        # ---------------- TEXT (UNCHANGED) ----------------
-        text = msg_obj.get("text", "").strip()
-        print("TEXT:", text)
-
-        if not text:
-            return "ok"
-
-        if text.lower().startswith("close "):
-            ticket_id = text.replace("close ", "").strip()
+            now = datetime.datetime.now().strftime('%H:%M')
 
             conn = get_db()
             c = conn.cursor()
-            c.execute("UPDATE tickets SET status='closed' WHERE id=?", (ticket_id,))
+            c.execute("INSERT INTO messages VALUES (NULL,?,?,?,?)",
+                      (ticket_id,"admin",f"[FILE] {filename}",now))
             conn.commit()
             conn.close()
 
-            send_telegram(f"🔒 Ticket {ticket_id} closed")
+            socketio.emit('new_message',{
+                "ticket_id":ticket_id,
+                "message":f"[FILE] {filename}",
+                "sender":"admin",
+                "time":now
+            }, broadcast=True)
+
+            send_telegram(f"🎥 Sent to #{ticket_id}")
             return "ok"
 
-        if text.lower().startswith("open "):
-            ticket_id = text.replace("open ", "").strip()
+        # ---------------- TEXT ----------------
+        text = msg_obj.get("text","").strip()
 
-            conn = get_db()
-            c = conn.cursor()
-            c.execute("UPDATE tickets SET status='open' WHERE id=?", (ticket_id,))
-            conn.commit()
-            conn.close()
-
-            send_telegram(f"🟢 Ticket {ticket_id} reopened")
+        match = re.match(r"#?\s*(\d+)\s*:\s*(.+)", text)
+        if not match:
+            send_telegram("❌ Use: #123456: message")
             return "ok"
 
-        if ":" not in text:
-            send_telegram("❌ Use format:\n#123456: your message")
-            return "ok"
-
-        ticket_id, msg = text.split(":", 1)
-        ticket_id = ticket_id.strip()
-        msg = msg.strip()
+        ticket_id = match.group(1)
+        msg = match.group(2)
 
         now = datetime.datetime.now().strftime('%H:%M')
 
+        # ⚡ instant feedback FIRST
+        send_telegram(f"💬 Sent to #{ticket_id}")
+
         conn = get_db()
         c = conn.cursor()
-        c.execute(
-            "INSERT INTO messages VALUES (NULL, ?, ?, ?, ?)",
-            (ticket_id, "admin", msg, now)
-        )
+        c.execute("INSERT INTO messages VALUES (NULL,?,?,?,?)",
+                  (ticket_id,"admin",msg,now))
         conn.commit()
         conn.close()
 
-        socketio.emit('new_message', {
-            "ticket_id": ticket_id,
-            "message": msg,
-            "sender": "admin",
-            "time": now
-        })
-
-        send_telegram(f"💬 Sent to {ticket_id}")
+        socketio.emit('new_message',{
+            "ticket_id":ticket_id,
+            "message":msg,
+            "sender":"admin",
+            "time":now
+        }, broadcast=True)
 
     except Exception as e:
         print("❌ TELEGRAM ERROR:", e)
 
     return "ok"
-
 
 
 # ---------------- FILE ROUTES ----------------
