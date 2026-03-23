@@ -11,7 +11,6 @@ body {
     background:#eef2ff;
 }
 
-/* MAIN */
 .container {
     max-width:900px;
     margin:20px auto;
@@ -23,7 +22,6 @@ body {
     box-shadow:0 20px 60px rgba(0,0,0,0.12);
 }
 
-/* HEADER */
 .header {
     padding:14px;
     background:#2563eb;
@@ -55,7 +53,6 @@ body {
     border-radius:20px;
 }
 
-/* MESSAGES */
 .messages {
     flex:1;
     padding:20px;
@@ -66,13 +63,11 @@ body {
     background:#f8fafc;
 }
 
-/* MESSAGE ROW */
 .msg-row {
     display:flex;
     gap:10px;
 }
 
-/* AVATAR */
 .avatar {
     width:34px;
     height:34px;
@@ -93,13 +88,11 @@ body {
     background:#e5e7eb;
 }
 
-/* BUBBLE */
 .bubble {
     max-width:70%;
     padding:12px;
     border-radius:14px;
     font-size:14px;
-    animation:fadeIn 0.2s ease;
 }
 
 .user {
@@ -112,21 +105,23 @@ body {
     background:#e5e7eb;
 }
 
-/* MEDIA */
 .bubble img, .bubble video {
     max-width:260px;
     border-radius:10px;
     margin-top:6px;
 }
 
-/* TIME */
 .time {
     font-size:10px;
     opacity:0.6;
     margin-top:4px;
 }
 
-/* INPUT */
+.status-check {
+    font-size:10px;
+    margin-left:6px;
+}
+
 .input-box {
     display:flex;
     padding:12px;
@@ -152,17 +147,10 @@ button {
     cursor:pointer;
 }
 
-/* TYPING */
 .typing {
     font-size:12px;
     color:#6b7280;
     padding-left:10px;
-}
-
-/* ANIMATION */
-@keyframes fadeIn {
-    from {opacity:0; transform:translateY(5px);}
-    to {opacity:1; transform:translateY(0);}
 }
 </style>
 </head>
@@ -184,38 +172,18 @@ button {
 {% for msg in messages %}
 <div class="msg-row">
 
-    {% if msg[0] == 'admin' %}
-    <div class="avatar admin-avatar">S</div>
-    {% endif %}
+{% if msg[0] == 'admin' %}
+<div class="avatar admin-avatar">S</div>
+{% endif %}
 
-    <div class="bubble {{msg[0]}}">
+<div class="bubble {{msg[0]}}">
+{{msg[1]}}
+<div class="time">{{msg[2]}}</div>
+</div>
 
-        {% if "[FILE]" in msg[1] %}
-            {% set file = msg[1].replace("[FILE] ", "") %}
-            {% set ext = file.split('.')[-1].lower() %}
-
-            {% if ext in ['jpg','jpeg','png','gif','webp'] %}
-                <img src="/uploads/{{file}}">
-            {% elif ext in ['mp4','webm','ogg'] %}
-                <video controls>
-                    <source src="/uploads/{{file}}">
-                </video>
-            {% else %}
-                <a href="/uploads/{{file}}" target="_blank">📎 {{file}}</a>
-            {% endif %}
-
-            <a href="/download/{{file}}" style="font-size:11px;">⬇ Download</a>
-
-        {% else %}
-            {{msg[1]}}
-        {% endif %}
-
-        <div class="time">{{msg[2]}}</div>
-    </div>
-
-    {% if msg[0] == 'user' %}
-    <div class="avatar user-avatar">U</div>
-    {% endif %}
+{% if msg[0] == 'user' %}
+<div class="avatar user-avatar">U</div>
+{% endif %}
 
 </div>
 {% endfor %}
@@ -225,10 +193,10 @@ button {
 <div id="typing" class="typing"></div>
 
 <div class="input-box">
-    <input id="messageInput" placeholder="Type a message...">
-    <input type="file" id="fileInput" hidden>
-    <button onclick="upload()">📎</button>
-    <button onclick="sendMessage()">➤</button>
+<input id="messageInput" placeholder="Type a message...">
+<input type="file" id="fileInput" hidden>
+<button onclick="upload()">📎</button>
+<button onclick="sendMessage()">➤</button>
 </div>
 
 </div>
@@ -242,21 +210,23 @@ const input = document.getElementById("messageInput");
 const fileInput = document.getElementById("fileInput");
 const typingEl = document.getElementById("typing");
 
-// JOIN ROOM (CRITICAL)
+let unread = 0;
+
 socket.emit("join_ticket", { ticket_id });
 
-// BACK
+if ("Notification" in window) {
+    Notification.requestPermission();
+}
+
 function goBack(){
     window.location.href = "/my-tickets";
 }
 
-// SCROLL
 function scrollDown(){
     box.scrollTop = box.scrollHeight;
 }
 scrollDown();
 
-// ADD MESSAGE (UPGRADED UI)
 function addMessage(msg, sender, time=""){
     let row = document.createElement("div");
     row.className = "msg-row";
@@ -268,27 +238,12 @@ function addMessage(msg, sender, time=""){
     let bubble = document.createElement("div");
     bubble.className = "bubble " + sender;
 
-    if(msg.startsWith("[FILE]")){
-        let file = msg.replace("[FILE] ","");
-        let url = "/uploads/" + file;
-        let ext = file.split('.').pop().toLowerCase();
+    bubble.innerText = msg;
 
-        if(["jpg","jpeg","png","gif","webp"].includes(ext)){
-            bubble.innerHTML = `<img src="${url}">`;
-        }
-        else if(["mp4","webm","ogg"].includes(ext)){
-            bubble.innerHTML = `<video controls><source src="${url}"></video>`;
-        }
-        else{
-            bubble.innerHTML = `<a href="${url}" target="_blank">📎 ${file}</a>`;
-        }
+    // ✓ indicator (safe UI only)
+    let check = sender==="user" ? "✓" : "";
 
-        bubble.innerHTML += `<br><a href="/download/${file}" style="font-size:11px;">⬇ Download</a>`;
-    } else {
-        bubble.innerText = msg;
-    }
-
-    bubble.innerHTML += `<div class="time">${time}</div>`;
+    bubble.innerHTML += `<div class="time">${time} <span class="status-check">${check}</span></div>`;
 
     if(sender==="user"){
         row.appendChild(bubble);
@@ -302,7 +257,6 @@ function addMessage(msg, sender, time=""){
     scrollDown();
 }
 
-// SEND
 function sendMessage(){
     let msg = input.value.trim();
     if(!msg) return;
@@ -317,7 +271,6 @@ function sendMessage(){
     input.value="";
 }
 
-// FILE
 function upload(){
     fileInput.click();
 }
@@ -337,14 +290,30 @@ fileInput.onchange = ()=>{
     });
 };
 
-// REALTIME
 socket.on('new_message', data=>{
     if(String(data.ticket_id) === String(ticket_id)){
         addMessage(data.message,data.sender,data.time);
+
+        // notification
+        if(data.sender==="admin" && document.hidden){
+            new Notification("New reply", { body:data.message });
+            unread++;
+            document.title = "(" + unread + ") Ticket";
+        }
     }
 });
 
-// ENTER
+// typing (safe UI only)
+input.addEventListener("input",()=>{
+    typingEl.innerText="Typing...";
+    setTimeout(()=>typingEl.innerText="",1000);
+});
+
+window.onfocus = ()=>{
+    unread=0;
+    document.title="Ticket";
+};
+
 input.addEventListener("keypress", e=>{
     if(e.key==="Enter"){
         e.preventDefault();

@@ -510,23 +510,27 @@ def admin_dashboard():
 
 
 # ---------------- SOCKET ----------------
+from flask_socketio import join_room
+
+
 @socketio.on('send_message')
 def handle_message(data):
 
     now = datetime.datetime.now().strftime('%H:%M')
-
-    ticket_id = str(data['ticket_id']).strip()   # 🔥 IMPORTANT
+    ticket_id = str(data['ticket_id']).strip()
 
     conn = get_db()
     c = conn.cursor()
 
-    c.execute("INSERT INTO messages VALUES (NULL, ?, ?, ?, ?)",
-              (ticket_id, data['sender'], data['message'], now))
+    c.execute(
+        "INSERT INTO messages VALUES (NULL, ?, ?, ?, ?)",
+        (ticket_id, data['sender'], data['message'], now)
+    )
 
     conn.commit()
     conn.close()
 
-    # 🔥 TELEGRAM SEND (unchanged)
+    # 🔥 TELEGRAM SEND (UNCHANGED)
     send_telegram(f"""
 💬 Message
 
@@ -542,7 +546,7 @@ From: {data['sender']}
         file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         send_telegram_file(file_path, ticket_id)
 
-    # ✅ 🔥 FIX: SEND TO ROOM (NOT BROADCAST)
+    # ✅ SEND MESSAGE TO ROOM (REALTIME FIX)
     socketio.emit('new_message', {
         "ticket_id": ticket_id,
         "message": data['message'],
@@ -550,12 +554,32 @@ From: {data['sender']}
         "time": now
     }, room=ticket_id)
 
+    # ✅ 🔥 DELIVERED STATUS
+    socketio.emit('delivered', {}, room=ticket_id)
 
+
+# ---------------- JOIN ROOM ----------------
 @socketio.on('join_ticket')
 def join_ticket(data):
     ticket_id = str(data['ticket_id']).strip()
     join_room(ticket_id)
     print(f"User joined room {ticket_id}")
+
+
+# ---------------- TYPING ----------------
+@socketio.on('typing')
+def typing(data):
+    ticket_id = str(data['ticket_id']).strip()
+
+    socketio.emit('typing', {}, room=ticket_id, include_self=False)
+
+
+# ---------------- SEEN ----------------
+@socketio.on('seen')
+def seen(data):
+    ticket_id = str(data['ticket_id']).strip()
+
+    socketio.emit('seen', {}, room=ticket_id)
 
 # ---------------- RUN ----------------
 if __name__ == '__main__':
