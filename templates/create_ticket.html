@@ -36,13 +36,11 @@ input, textarea, select {
     padding:12px;
     border-radius:8px;
     border:1px solid #ccc;
-    outline:none;
 }
 
 .counter {
     font-size:12px;
     text-align:right;
-    color:#666;
 }
 
 .file-box {
@@ -51,11 +49,6 @@ input, textarea, select {
     text-align:center;
     border-radius:10px;
     cursor:pointer;
-}
-
-.file-box.drag {
-    border-color:var(--primary);
-    background:#eef4ff;
 }
 
 .preview img, .preview video {
@@ -70,7 +63,6 @@ input, textarea, select {
     border-radius:8px;
     background:var(--primary);
     color:white;
-    cursor:pointer;
     width:100%;
 }
 
@@ -78,7 +70,6 @@ input, textarea, select {
 
 .loading {
     text-align:center;
-    margin-top:10px;
     display:none;
 }
 
@@ -92,7 +83,7 @@ input, textarea, select {
 <body>
 
 <div class="header">
-    <img src="/static/logo.png" class="logo">
+<img src="/static/logo.png" class="logo">
 </div>
 
 <div class="container">
@@ -101,13 +92,8 @@ input, textarea, select {
 <div id="step1" class="step active">
 <h3>Create Ticket</h3>
 
-<div class="input-group">
-<input id="name" placeholder="Full Name" required>
-</div>
-
-<div class="input-group">
-<input id="email" placeholder="Email" required>
-</div>
+<input id="name" placeholder="Full Name">
+<input id="email" placeholder="Email">
 
 <button class="btn" onclick="validateStep1()">Next</button>
 </div>
@@ -116,29 +102,16 @@ input, textarea, select {
 <div id="step2" class="step">
 <h3>Issue Details</h3>
 
-<div class="input-group">
 <select id="issueType" onchange="autoFill()">
-<option value="">-- Select Issue --</option>
+<option value="">Select Issue</option>
 <option>Withdrawal</option>
 <option>Deposit</option>
-<option>SMS not received</option>
-<option>Email not received</option>
-<option>Code not received</option>
-<option>Change of address</option>
-<option>Change of email address</option>
-<option>Change of phone number</option>
-<option>Change of name</option>
 </select>
-</div>
 
-<div class="input-group">
 <input id="subject" placeholder="Subject">
-</div>
 
-<div class="input-group">
 <textarea id="message" oninput="countChars()" placeholder="Describe your issue"></textarea>
 <div class="counter" id="counter">0/500</div>
-</div>
 
 <button class="btn secondary" onclick="nextStep(1)">Back</button>
 <button class="btn" onclick="validateStep2()">Next</button>
@@ -150,9 +123,8 @@ input, textarea, select {
 
 <div id="dropZone" class="file-box">
 <input type="file" id="fileInput" hidden>
-<p>Drop file or click</p>
+<p>Click or drop file</p>
 <div id="fileName"></div>
-
 <div class="preview" id="preview"></div>
 </div>
 
@@ -164,13 +136,10 @@ input, textarea, select {
 <div id="step4" class="step">
 <h3>Review</h3>
 
-<div class="summary">
 <p><b>Name:</b> <span id="sumName"></span></p>
 <p><b>Email:</b> <span id="sumEmail"></span></p>
-<p><b>Issue:</b> <span id="sumIssue"></span></p>
 <p><b>Subject:</b> <span id="sumSubject"></span></p>
 <p><b>Message:</b> <span id="sumMessage"></span></p>
-</div>
 
 <button class="btn secondary" onclick="nextStep(3)">Back</button>
 <button class="btn" id="submitBtn" onclick="submitTicket()">Submit</button>
@@ -183,37 +152,30 @@ input, textarea, select {
 <h2>✅ Ticket Created</h2>
 <p>Your Ticket ID:</p>
 <h3 id="ticketId"></h3>
+<p id="autoText"></p>
 <a href="/my-tickets">View My Tickets</a>
 </div>
-
-<p style="text-align:center;margin-top:20px;">
-<a href="/my-tickets" style="color:#2563eb;text-decoration:none;font-weight:500;">
-View My Tickets
-</a>
-</p>
 
 </div>
 
 <script>
-// ELEMENTS
 let nameEl = document.getElementById("name");
 let emailEl = document.getElementById("email");
 let subjectEl = document.getElementById("subject");
 let messageEl = document.getElementById("message");
-let issueTypeEl = document.getElementById("issueType");
 
 let createdTicketId = null;
 
-// STEP NAV
+// STEP
 function nextStep(n){
     document.querySelectorAll(".step").forEach(s=>s.classList.remove("active"));
     document.getElementById("step"+n).classList.add("active");
 }
 
-// VALIDATION
+// VALIDATE
 function validateStep1(){
     if(!nameEl.value || !emailEl.value){
-        alert("Please fill name and email");
+        alert("Fill all fields");
         return;
     }
     nextStep(2);
@@ -221,7 +183,7 @@ function validateStep1(){
 
 function validateStep2(){
     if(!subjectEl.value || !messageEl.value){
-        alert("Please fill subject and message");
+        alert("Fill all fields");
         return;
     }
     nextStep(3);
@@ -229,43 +191,30 @@ function validateStep2(){
 
 // COUNT
 function countChars(){
-    document.getElementById("counter").innerText = messageEl.value.length + "/500";
+    counter.innerText = messageEl.value.length + "/500";
 }
 
-// AUTO FILL
+// AUTO
 function autoFill(){
-    let issue = issueTypeEl.value;
-    if(!issue) return;
-
-    subjectEl.value = issue + " Issue";
-    messageEl.value = `Hello,\n\nIssue: ${issue}`;
-    countChars();
+    subjectEl.value = issueType.value + " Issue";
 }
 
 // SUMMARY
 function showSummary(){
     sumName.innerText = nameEl.value;
     sumEmail.innerText = emailEl.value;
-    sumIssue.innerText = issueTypeEl.value;
     sumSubject.innerText = subjectEl.value;
     sumMessage.innerText = messageEl.value;
     nextStep(4);
 }
 
-// SAVE EMAIL
-function saveUser(){
-    localStorage.setItem("user_email", emailEl.value);
-}
-
-// 🔥 FIXED SUBMIT (NO BUG)
+// 🔥 FIXED SUBMIT (REAL FIX)
 async function submitTicket(){
     let btn = document.getElementById("submitBtn");
     let loading = document.getElementById("loading");
 
     btn.disabled = true;
     loading.style.display = "block";
-
-    saveUser();
 
     let formData = new FormData();
     formData.append("name", nameEl.value);
@@ -278,7 +227,6 @@ async function submitTicket(){
     }
 
     try{
-        // 🔥 IMPORTANT FIX
         let res = await fetch("/", {
             method:"POST",
             body:formData,
@@ -291,17 +239,13 @@ async function submitTicket(){
             createdTicketId = location.split("/").pop();
 
             document.querySelectorAll(".step").forEach(s=>s.style.display="none");
-            successBox.style.display = "block";
-            ticketId.innerText = "#" + createdTicketId;
+            document.getElementById("successBox").style.display = "block";
 
-            // 🔥 ENABLE NOTIFICATIONS
+            document.getElementById("ticketId").innerText = "#" + createdTicketId;
+
+            showDelivered();
             enableNotifications();
-
-            // 🔥 AUTO OPEN AFTER 10s
-            setTimeout(()=>{
-                window.location.href = "/ticket/" + createdTicketId;
-            },10000);
-
+            startAutoOpen();
         } else {
             alert("Error submitting ticket");
         }
@@ -314,16 +258,47 @@ async function submitTicket(){
     loading.style.display = "none";
 }
 
+// 🔥 AUTO OPEN
+function startAutoOpen(){
+    let time = 10;
+    let el = document.getElementById("autoText");
 
-// FILE PREVIEW (UNCHANGED)
+    let i = setInterval(()=>{
+        el.innerText = "Opening chat in " + time + "s...";
+        time--;
+
+        if(time < 0){
+            clearInterval(i);
+            window.location.href = "/ticket/" + createdTicketId;
+        }
+    },1000);
+}
+
+// 🔥 DELIVERY CHECK
+function showDelivered(){
+    let el = document.createElement("div");
+    el.innerText = "✓ Delivered";
+    el.style.fontSize = "12px";
+    el.style.color = "green";
+    document.getElementById("successBox").appendChild(el);
+}
+
+// 🔥 NOTIFICATION
+function enableNotifications(){
+    if ("Notification" in window){
+        Notification.requestPermission();
+    }
+}
+
+// FILE
 let dropZone = document.getElementById("dropZone");
 let fileInput = document.getElementById("fileInput");
 let fileName = document.getElementById("fileName");
 let preview = document.getElementById("preview");
 
-dropZone.onclick = () => fileInput.click();
+dropZone.onclick = ()=>fileInput.click();
 
-fileInput.onchange = () => {
+fileInput.onchange = ()=>{
     let file = fileInput.files[0];
     if(!file) return;
 
@@ -342,32 +317,6 @@ fileInput.onchange = () => {
         preview.appendChild(vid);
     }
 };
-
-// 🔥 PUSH NOTIFICATIONS
-function enableNotifications(){
-    if ("Notification" in window){
-        Notification.requestPermission();
-    }
-}
-
-// 🔥 MOCK: LISTEN FOR ADMIN REPLY (works when user opens ticket page)
-function notifyAdminReply(msg){
-    if(Notification.permission === "granted"){
-        new Notification("New Support Reply", {
-            body: msg,
-            icon: "/static/logo.png"
-        });
-    }
-}
-
-// 🔥 DELIVERY CHECK (UI feedback)
-function showDelivered(){
-    let el = document.createElement("div");
-    el.innerText = "✓ Delivered";
-    el.style.fontSize = "12px";
-    el.style.color = "green";
-    document.getElementById("successBox").appendChild(el);
-}
 
 // AUTO EMAIL
 window.onload = () => {
