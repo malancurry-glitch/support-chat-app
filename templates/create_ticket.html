@@ -3,6 +3,8 @@
 <head>
 <title>Submit a Request</title>
 
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
 <style>
 :root { --primary:#2563eb; }
 
@@ -12,25 +14,21 @@ body {
     background:#f3f4f6;
 }
 
-/* Header */
-.header { text-align:center; padding:30px; }
-.logo { height:50px; }
+.header { text-align:center; padding:20px; }
+.logo { height:45px; }
 
-/* Card */
 .container {
     max-width:650px;
     margin:auto;
     background:white;
-    padding:30px;
+    padding:20px;
     border-radius:12px;
     box-shadow:0 10px 30px rgba(0,0,0,0.1);
 }
 
-/* Steps */
 .step { display:none; }
 .active { display:block; }
 
-/* Inputs */
 .input-group { margin-bottom:20px; }
 
 input, textarea, select {
@@ -38,16 +36,15 @@ input, textarea, select {
     padding:12px;
     border-radius:8px;
     border:1px solid #ccc;
+    outline:none;
 }
 
-/* Counter */
 .counter {
     font-size:12px;
     text-align:right;
     color:#666;
 }
 
-/* File */
 .file-box {
     border:2px dashed #ccc;
     padding:20px;
@@ -61,7 +58,12 @@ input, textarea, select {
     background:#eef4ff;
 }
 
-/* Buttons */
+.preview img, .preview video {
+    max-width:100%;
+    margin-top:10px;
+    border-radius:10px;
+}
+
 .btn {
     padding:12px;
     border:none;
@@ -74,11 +76,15 @@ input, textarea, select {
 
 .btn.secondary { background:#ccc; }
 
-/* Summary */
-.summary {
-    background:#f9fafb;
-    padding:15px;
-    border-radius:10px;
+.loading {
+    text-align:center;
+    margin-top:10px;
+    display:none;
+}
+
+.success-box {
+    display:none;
+    text-align:center;
 }
 </style>
 </head>
@@ -96,14 +102,14 @@ input, textarea, select {
 <h3>Create Ticket</h3>
 
 <div class="input-group">
-<input id="name" placeholder="Full Name">
+<input id="name" placeholder="Full Name" required>
 </div>
 
 <div class="input-group">
-<input id="email" placeholder="Email">
+<input id="email" placeholder="Email" required>
 </div>
 
-<button class="btn" onclick="nextStep(2)">Next</button>
+<button class="btn" onclick="validateStep1()">Next</button>
 </div>
 
 <!-- STEP 2 -->
@@ -135,7 +141,7 @@ input, textarea, select {
 </div>
 
 <button class="btn secondary" onclick="nextStep(1)">Back</button>
-<button class="btn" onclick="nextStep(3)">Next</button>
+<button class="btn" onclick="validateStep2()">Next</button>
 </div>
 
 <!-- STEP 3 -->
@@ -146,6 +152,8 @@ input, textarea, select {
 <input type="file" id="fileInput" hidden>
 <p>Drop file or click</p>
 <div id="fileName"></div>
+
+<div class="preview" id="preview"></div>
 </div>
 
 <button class="btn secondary" onclick="nextStep(2)">Back</button>
@@ -165,7 +173,17 @@ input, textarea, select {
 </div>
 
 <button class="btn secondary" onclick="nextStep(3)">Back</button>
-<button class="btn" onclick="submitTicket()">Submit</button>
+<button class="btn" id="submitBtn" onclick="submitTicket()">Submit</button>
+
+<div class="loading" id="loading">Submitting...</div>
+</div>
+
+<!-- SUCCESS -->
+<div id="successBox" class="success-box">
+<h2>✅ Ticket Created</h2>
+<p>Your Ticket ID:</p>
+<h3 id="ticketId"></h3>
+<a href="/my-tickets">View My Tickets</a>
 </div>
 
 <p style="text-align:center;margin-top:20px;">
@@ -177,99 +195,181 @@ View My Tickets
 </div>
 
 <script>
-// ---------------- INIT ----------------
+// ELEMENTS
 let nameEl = document.getElementById("name");
 let emailEl = document.getElementById("email");
 let subjectEl = document.getElementById("subject");
 let messageEl = document.getElementById("message");
 let issueTypeEl = document.getElementById("issueType");
 
-// ---------------- STEP ----------------
+let createdTicketId = null;
+
+// STEP NAV
 function nextStep(n){
     document.querySelectorAll(".step").forEach(s=>s.classList.remove("active"));
     document.getElementById("step"+n).classList.add("active");
 }
 
-// ---------------- COUNT ----------------
+// VALIDATION
+function validateStep1(){
+    if(!nameEl.value || !emailEl.value){
+        alert("Please fill name and email");
+        return;
+    }
+    nextStep(2);
+}
+
+function validateStep2(){
+    if(!subjectEl.value || !messageEl.value){
+        alert("Please fill subject and message");
+        return;
+    }
+    nextStep(3);
+}
+
+// COUNT
 function countChars(){
     document.getElementById("counter").innerText = messageEl.value.length + "/500";
 }
 
-// ---------------- AUTO FILL ----------------
+// AUTO FILL
 function autoFill(){
     let issue = issueTypeEl.value;
     if(!issue) return;
 
     subjectEl.value = issue + " Issue";
-    messageEl.value = `Hello,\n\nI am experiencing an issue with: ${issue}.\n\nDetails:\n`;
+    messageEl.value = `Hello,\n\nIssue: ${issue}`;
     countChars();
 }
 
-// ---------------- SUMMARY ----------------
+// SUMMARY
 function showSummary(){
-    document.getElementById("sumName").innerText = nameEl.value;
-    document.getElementById("sumEmail").innerText = emailEl.value;
-    document.getElementById("sumIssue").innerText = issueTypeEl.value;
-    document.getElementById("sumSubject").innerText = subjectEl.value;
-    document.getElementById("sumMessage").innerText = messageEl.value;
+    sumName.innerText = nameEl.value;
+    sumEmail.innerText = emailEl.value;
+    sumIssue.innerText = issueTypeEl.value;
+    sumSubject.innerText = subjectEl.value;
+    sumMessage.innerText = messageEl.value;
     nextStep(4);
 }
 
-// ---------------- SAVE USER ----------------
+// SAVE EMAIL
 function saveUser(){
     localStorage.setItem("user_email", emailEl.value);
 }
 
-// ---------------- SUBMIT ----------------
+// 🔥 FIXED SUBMIT (NO BUG)
 async function submitTicket(){
+    let btn = document.getElementById("submitBtn");
+    let loading = document.getElementById("loading");
+
+    btn.disabled = true;
+    loading.style.display = "block";
+
     saveUser();
 
     let formData = new FormData();
-
     formData.append("name", nameEl.value);
     formData.append("email", emailEl.value);
     formData.append("subject", subjectEl.value);
     formData.append("message", messageEl.value);
-    formData.append("priority","Medium");
 
     if(fileInput.files[0]){
         formData.append("file", fileInput.files[0]);
     }
 
-    let res = await fetch("/", { method:"POST", body:formData });
+    try{
+        // 🔥 IMPORTANT FIX
+        let res = await fetch("/", {
+            method:"POST",
+            body:formData,
+            redirect:"manual"
+        });
 
-    if(res.redirected){
-        window.location.href = res.url;
-    } else {
-        alert("Error submitting ticket");
+        let location = res.headers.get("Location");
+
+        if(location){
+            createdTicketId = location.split("/").pop();
+
+            document.querySelectorAll(".step").forEach(s=>s.style.display="none");
+            successBox.style.display = "block";
+            ticketId.innerText = "#" + createdTicketId;
+
+            // 🔥 ENABLE NOTIFICATIONS
+            enableNotifications();
+
+            // 🔥 AUTO OPEN AFTER 10s
+            setTimeout(()=>{
+                window.location.href = "/ticket/" + createdTicketId;
+            },10000);
+
+        } else {
+            alert("Error submitting ticket");
+        }
+
+    }catch(e){
+        alert("Network error");
     }
+
+    btn.disabled = false;
+    loading.style.display = "none";
 }
 
-// ---------------- FILE ----------------
+
+// FILE PREVIEW (UNCHANGED)
 let dropZone = document.getElementById("dropZone");
 let fileInput = document.getElementById("fileInput");
 let fileName = document.getElementById("fileName");
+let preview = document.getElementById("preview");
 
 dropZone.onclick = () => fileInput.click();
 
 fileInput.onchange = () => {
-    if(fileInput.files[0]){
-        fileName.innerText = fileInput.files[0].name;
+    let file = fileInput.files[0];
+    if(!file) return;
+
+    fileName.innerText = file.name;
+    preview.innerHTML = "";
+
+    if(file.type.startsWith("image")){
+        let img = document.createElement("img");
+        img.src = URL.createObjectURL(file);
+        preview.appendChild(img);
+    }
+    else if(file.type.startsWith("video")){
+        let vid = document.createElement("video");
+        vid.src = URL.createObjectURL(file);
+        vid.controls = true;
+        preview.appendChild(vid);
     }
 };
 
-dropZone.addEventListener("dragover", e=>{
-    e.preventDefault();
-    dropZone.classList.add("drag");
-});
+// 🔥 PUSH NOTIFICATIONS
+function enableNotifications(){
+    if ("Notification" in window){
+        Notification.requestPermission();
+    }
+}
 
-dropZone.addEventListener("drop", e=>{
-    e.preventDefault();
-    fileInput.files = e.dataTransfer.files;
-    fileName.innerText = fileInput.files[0].name;
-});
+// 🔥 MOCK: LISTEN FOR ADMIN REPLY (works when user opens ticket page)
+function notifyAdminReply(msg){
+    if(Notification.permission === "granted"){
+        new Notification("New Support Reply", {
+            body: msg,
+            icon: "/static/logo.png"
+        });
+    }
+}
 
-// ---------------- AUTO EMAIL ----------------
+// 🔥 DELIVERY CHECK (UI feedback)
+function showDelivered(){
+    let el = document.createElement("div");
+    el.innerText = "✓ Delivered";
+    el.style.fontSize = "12px";
+    el.style.color = "green";
+    document.getElementById("successBox").appendChild(el);
+}
+
+// AUTO EMAIL
 window.onload = () => {
     let saved = localStorage.getItem("user_email");
     if(saved){

@@ -10,7 +10,6 @@ body {
     margin:0;
 }
 
-/* Container */
 .container {
     max-width:600px;
     margin:50px auto;
@@ -20,7 +19,6 @@ body {
     box-shadow:0 10px 30px rgba(0,0,0,0.1);
 }
 
-/* Ticket */
 .ticket {
     padding:15px;
     border-bottom:1px solid #eee;
@@ -32,7 +30,6 @@ body {
     background:#f9fafb;
 }
 
-/* Status */
 .status {
     font-size:12px;
     padding:2px 6px;
@@ -43,7 +40,6 @@ body {
 .open { background:#22c55e; color:white; }
 .closed { background:#ef4444; color:white; }
 
-/* Button */
 .btn {
     padding:10px;
     background:#2563eb;
@@ -54,11 +50,16 @@ body {
     cursor:pointer;
 }
 
-/* Empty */
 .empty {
     text-align:center;
     color:#666;
     margin-top:20px;
+}
+
+.divider {
+    margin:20px 0;
+    text-align:center;
+    color:#999;
 }
 </style>
 
@@ -70,10 +71,20 @@ body {
 
 <h3>Find Your Tickets</h3>
 
+<!-- 🔥 EMAIL SEARCH (KEEP ORIGINAL) -->
 <form method="POST">
     <input id="emailInput" name="email" placeholder="Enter your email" required style="width:100%;padding:10px;margin-bottom:10px;">
-    <button class="btn">Search</button>
+    <button class="btn">Search by Email</button>
 </form>
+
+<div class="divider">OR</div>
+
+<!-- 🔥 NEW: TICKET ID + EMAIL SEARCH -->
+<div>
+    <input id="ticketIdInput" placeholder="Enter Ticket ID (#123456)" style="width:100%;padding:10px;margin-bottom:10px;">
+    <input id="emailCheck" placeholder="Confirm Email" style="width:100%;padding:10px;margin-bottom:10px;">
+    <button class="btn" onclick="checkTicket()">Check Ticket</button>
+</div>
 
 {% if tickets is not none %}
 <hr>
@@ -93,7 +104,7 @@ No tickets found for {{email}}
         {{t[2]}}
     </span>
     <br>
-    <small>ID: {{t[0]}}</small><br>
+    <small>ID: #{{t[0]}}</small><br>
     <small>{{t[3]}}</small>
 </div>
 {% endfor %}
@@ -109,10 +120,11 @@ window.onload = () => {
     let saved = localStorage.getItem("user_email");
     if(saved){
         document.getElementById("emailInput").value = saved;
+        document.getElementById("emailCheck").value = saved;
     }
 };
 
-// 🔥 SAVE EMAIL ON SUBMIT
+// 🔥 SAVE EMAIL
 document.querySelector("form").addEventListener("submit", ()=>{
     let email = document.getElementById("emailInput").value;
     localStorage.setItem("user_email", email);
@@ -121,6 +133,20 @@ document.querySelector("form").addEventListener("submit", ()=>{
 // 🔥 OPEN TICKET
 function openTicket(id){
     window.location.href = "/ticket/" + id;
+}
+
+// 🔥 NEW: CHECK BY ID + EMAIL
+function checkTicket(){
+    let id = document.getElementById("ticketIdInput").value.replace("#","");
+    let email = document.getElementById("emailCheck").value;
+
+    if(!id || !email){
+        alert("Enter Ticket ID and Email");
+        return;
+    }
+
+    // 🔥 simple redirect (backend validates)
+    window.location.href = `/ticket/${id}?email=${encodeURIComponent(email)}`;
 }
 </script>
 
