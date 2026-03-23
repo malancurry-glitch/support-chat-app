@@ -135,7 +135,7 @@ def send_telegram(text, ticket_id=None):
                     timeout=10
                 )
 
-        # 🔥 AFTER ASSIGNMENT → SEND ONLY ASSIGNED AGENT
+        # 🔥 AFTER ASSIGNMENT → SEND ONLY TO ONE AGENT
         else:
             chat_id = AGENT_CHAT_MAP.get(assigned)
 
@@ -150,14 +150,81 @@ def send_telegram(text, ticket_id=None):
         print("❌ Telegram send error:", e)
 
 
-# ---------------- AUTO ASSIGN ----------------
-def get_least_busy_agent(exclude=None):
-    agents = [a for a in AGENT_CHAT_MAP.keys() if a != exclude]
 
-    if not agents:
+# ---------------- AUTO ASSIGN LEAST BUSY ----------------
+def get_least_busy_agent():
+    if not agent_workload:
         return None
+    return min(agent_workload, key=agent_workload.get)
 
-    return min(agents, key=lambda a: agent_workload.get(a, 0))
+
+# ---------------- TELEGRAM SEND WITH BUTTONS ----------------
+def send_telegram_with_buttons(text, ticket_id):
+    try:
+        token = os.getenv("TELEGRAM_BOT_TOKEN")
+        chat_ids = os.getenv("TELEGRAM_CHAT_IDS", "").split(",")
+
+        buttons = {
+            "inline_keyboard": [[
+                {"text": "🟢 Claim Ticket", "callback_data": f"claim_{ticket_id}"},
+                {"text": "🔁 Transfer", "callback_data": f"transfer_{ticket_id}"},
+                {"text": "🔒 Close", "callback_data": f"close_{ticket_id}"}
+            ]]
+        }
+
+        for chat_id in chat_ids:
+            chat_id = chat_id.strip()
+            if not chat_id:
+                continue
+
+            res = requests.post(
+                f"https://api.telegram.org/bot{token}/sendMessage",
+                json={
+                    "chat_id": chat_id,
+                    "text": text,
+                    "reply_markup": buttons
+                },
+                timeout=10
+            )
+
+            print("📤 BUTTON:", chat_id, res.status_code, res.text)
+
+    except Exception as e:
+        print("❌ BUTTON ERROR:", e)
+
+
+# ---------------- DOWNLOAD TELEGRAM FILE ----------------
+def download_telegram_file(file_id):
+    try:
+        token = os.getenv("TELEGRAM_BOT_TOKEN")
+
+        file_info = requests.get(
+            f"https://api.telegram.org/bot{token}/getFile",
+            params={"file_id": file_id},
+            timeout=10
+        ).json()
+
+        if not file_info.get("ok"):
+            print("❌ FILE INFO ERROR:", file_info)
+            return None
+
+        file_path = file_info["result"]["file_path"]
+        file_url = f"https://api.telegram.org/file/bot{token}/{file_path}"
+
+        content = requests.get(file_url, timeout=10).content
+        filename = file_path.split("/")[-1]
+
+        save_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+
+        with open(save_path, "wb") as f:
+            f.write(content)
+
+        print("📥 FILE DOWNLOADED:", filename)
+        return filename
+
+    except Exception as e:
+        print("❌ FILE DOWNLOAD ERROR:", e)
+        return None
 
 
 # ---------------- TELEGRAM RECEIVE ----------------
@@ -173,15 +240,11 @@ def telegram_webhook():
             query = data["callback_query"]
             action = query["data"]
             agent = query["from"]["first_name"]
-            chat_id = str(query["from"]["id"])
-
-            # 🔥 REGISTER AGENT
-            AGENT_CHAT_MAP[agent] = chat_id
 
             conn = get_db()
             c = conn.cursor()
 
-            # ---------------- CLAIM ----------------
+            # CLAIM
             if action.startswith("claim_"):
                 ticket_id = action.replace("claim_", "")
 
@@ -191,10 +254,7 @@ def telegram_webhook():
                 if row and row["assigned_to"]:
                     send_telegram(f"❌ Already assigned to {row['assigned_to']}")
                 else:
-                    c.execute(
-                        "UPDATE tickets SET assigned_to=? WHERE id=?",
-                        (agent, ticket_id)
-                    )
+                    c.execute("UPDATE tickets SET assigned_to=? WHERE id=?", (agent, ticket_id))
                     conn.commit()
 
                     agent_workload[agent] = agent_workload.get(agent, 0) + 1
@@ -209,21 +269,30 @@ def telegram_webhook():
                 conn.close()
                 return "ok"
 
-            # ---------------- TRANSFER ----------------
+            # TRANSFER
             if action.startswith("transfer_"):
                 ticket_id = action.replace("transfer_", "")
-                current_agent = agent
+                current_agent = agent  # 🔥 important
 
-                new_agent = get_least_busy_agent(exclude=current_agent)
-
-                if not new_agent:
-                    send_telegram("❌ No other agents available")
+                # 🔥 exclude current agent
+                available_agents = [
+                    a for a in AGENT_CHAT_MAP.keys()
+                     if a != current_agent
+    ]
+                # 🔥 fallback if no other agents
+                if not available_agents:
+                    send_telegram(
+                        "⚠️ No other agents available.\n\nSend:\ntransfer: username\nExample:\ntransfer: Jerry",
+                        ticket_id
+        )
                     return "ok"
+                # 🔥 pick least busy from others
+                new_agent = min(
+                    available_agents,
+                     key=lambda a: agent_workload.get(a, 0)
+    )
 
-                c.execute(
-                    "UPDATE tickets SET assigned_to=? WHERE id=?",
-                    (new_agent, ticket_id)
-                )
+                c.execute("UPDATE tickets SET assigned_to=? WHERE id=?", (new_agent, ticket_id))
                 conn.commit()
 
                 socketio.emit("agent_transfer", {
@@ -231,28 +300,7 @@ def telegram_webhook():
                     "to": new_agent
                 }, room=ticket_id)
 
-                send_telegram(f"🔁 {ticket_id} → {new_agent}")
-
-                conn.close()
-                return "ok"
-
-            # ---------------- CLOSE ----------------
-            if action.startswith("close_"):
-                ticket_id = action.replace("close_", "")
-
-                c.execute("SELECT assigned_to FROM tickets WHERE id=?", (ticket_id,))
-                row = c.fetchone()
-
-                if row and row["assigned_to"]:
-                    a = row["assigned_to"]
-                    agent_workload[a] = max(0, agent_workload.get(a, 1) - 1)
-
-                c.execute("UPDATE tickets SET status='closed' WHERE id=?", (ticket_id,))
-                conn.commit()
-
-                socketio.emit("ticket_closed", {}, room=ticket_id)
-
-                send_telegram(f"🔒 Ticket #{ticket_id} closed")
+                send_telegram(f"🔁 Ticket #{ticket_id} transferred to {new_agent}")
 
                 conn.close()
                 return "ok"
@@ -263,12 +311,8 @@ def telegram_webhook():
             return "ok"
 
         now = datetime.datetime.now().strftime('%H:%M')
-
         agent = msg_obj.get("from", {}).get("first_name", "Agent")
-        chat_id = str(msg_obj.get("chat", {}).get("id"))
-
-        # 🔥 REGISTER AGENT
-        AGENT_CHAT_MAP[agent] = chat_id
+        
 
         # ---------------- IMAGE ----------------
         if "photo" in msg_obj:
@@ -278,14 +322,55 @@ def telegram_webhook():
             caption = msg_obj.get("caption", "")
             ticket_id = re.search(r"\d+", caption).group(0) if caption else None
 
+            if not ticket_id:
+                send_telegram("❌ Use caption: #123456")
+                return "ok"
+
+            # CHECK ASSIGNMENT
             conn = get_db()
             c = conn.cursor()
-
             c.execute("SELECT assigned_to FROM tickets WHERE id=?", (ticket_id,))
             row = c.fetchone()
 
             if not row or row["assigned_to"] != agent:
-                send_telegram(f"❌ Assigned to {row['assigned_to'] if row else 'none'}")
+                send_telegram(f"❌ Ticket assigned to {row['assigned_to'] if row else 'none'}")
+                return "ok"
+
+            c.execute("INSERT INTO messages VALUES (NULL,?,?,?,?)",
+                      (ticket_id, "admin", f"[FILE] {filename}", now))
+            conn.commit()
+            conn.close()
+
+            socketio.emit("new_message", {
+                "ticket_id": ticket_id,
+                "message": f"[FILE] {filename}",
+                "sender": "admin",
+                "time": now,
+                "agent": agent
+            }, room=ticket_id)
+
+            send_telegram(f"💬 From: {agent}\nTicket #{ticket_id}\n{msg}", ticket_id)
+            return "ok"
+
+        # ---------------- VIDEO ----------------
+        if "video" in msg_obj:
+            file_id = msg_obj["video"]["file_id"]
+            filename = download_telegram_file(file_id)
+
+            caption = msg_obj.get("caption", "")
+            ticket_id = re.search(r"\d+", caption).group(0) if caption else None
+
+            if not ticket_id:
+                send_telegram("❌ Use caption: #123456")
+                return "ok"
+
+            conn = get_db()
+            c = conn.cursor()
+            c.execute("SELECT assigned_to FROM tickets WHERE id=?", (ticket_id,))
+            row = c.fetchone()
+
+            if not row or row["assigned_to"] != agent:
+                send_telegram(f"❌ Ticket assigned to {row['assigned_to'] if row else 'none'}")
                 return "ok"
 
             c.execute("INSERT INTO messages VALUES (NULL,?,?,?,?)",
@@ -302,40 +387,6 @@ def telegram_webhook():
             }, room=ticket_id)
 
             send_telegram(f"📷 From: {agent}\nTicket #{ticket_id}", ticket_id)
-            return "ok"
-
-        # ---------------- VIDEO ----------------
-        if "video" in msg_obj:
-            file_id = msg_obj["video"]["file_id"]
-            filename = download_telegram_file(file_id)
-
-            caption = msg_obj.get("caption", "")
-            ticket_id = re.search(r"\d+", caption).group(0) if caption else None
-
-            conn = get_db()
-            c = conn.cursor()
-
-            c.execute("SELECT assigned_to FROM tickets WHERE id=?", (ticket_id,))
-            row = c.fetchone()
-
-            if not row or row["assigned_to"] != agent:
-                send_telegram(f"❌ Assigned to {row['assigned_to'] if row else 'none'}")
-                return "ok"
-
-            c.execute("INSERT INTO messages VALUES (NULL,?,?,?,?)",
-                      (ticket_id, "admin", f"[FILE] {filename}", now))
-            conn.commit()
-            conn.close()
-
-            socketio.emit("new_message", {
-                "ticket_id": ticket_id,
-                "message": f"[FILE] {filename}",
-                "sender": "admin",
-                "time": now,
-                "agent": agent
-            }, room=ticket_id)
-
-            send_telegram(f"🎥 From: {agent}\nTicket #{ticket_id}", ticket_id)
             return "ok"
 
         # ---------------- TEXT ----------------
@@ -361,7 +412,7 @@ def telegram_webhook():
             return "ok"
 
         if assigned != agent:
-            send_telegram(f"❌ Assigned to {assigned}")
+            send_telegram(f"❌ This ticket is assigned to {assigned}")
             return "ok"
 
         c.execute("INSERT INTO messages VALUES (NULL,?,?,?,?)",
