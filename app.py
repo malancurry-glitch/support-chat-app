@@ -755,7 +755,7 @@ def agent_transfer(data):
 
 
 @socketio.on('disconnect')
-def agent_disconnect():
+def handle_disconnect():
     if "admin" in session:
         agent_name = session.get("admin", "Agent")
         now = datetime.datetime.now().strftime('%d %b %Y, %I:%M %p')
@@ -765,15 +765,24 @@ def agent_disconnect():
             "time": now
         })
 
-        
 
 # ---------------- JOIN ROOM ----------------
 @socketio.on('join_ticket')
 def join_ticket(data):
     ticket_id = str(data['ticket_id']).strip()
     join_room(ticket_id)
-    print(f"User joined room {ticket_id}")
 
+    print(f"Joined room {ticket_id}")
+
+    # 🔥 ONLY ADMIN SHOULD TRIGGER JOIN MESSAGE
+    if "admin" in session:
+        agent_name = session.get("admin", "Agent")
+        now = datetime.datetime.now().strftime('%d %b %Y, %I:%M %p')
+
+        socketio.emit('agent_join', {
+            "agent": agent_name,
+            "time": now
+        }, room=ticket_id)
 
 # ---------------- TYPING ----------------
 @socketio.on('typing')
@@ -793,6 +802,15 @@ def seen(data):
     socketio.emit('seen', {
         "ticket_id": ticket_id
     }, room=ticket_id)
+
+
+
+
+@socketio.on_error_default
+def default_error_handler(e):
+    print("Socket error:", e)
+
+
 
 # ---------------- RUN ----------------
 if __name__ == '__main__':
