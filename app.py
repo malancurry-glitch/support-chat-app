@@ -7,6 +7,10 @@ import requests
 from werkzeug.utils import secure_filename
 from dotenv import load_dotenv
 from flask_socketio import join_room
+from flask import session, redirect, render_template, request, jsonify
+from werkzeug.security import check_password_hash
+from werkzeug.security import generate_password_hash
+
 
 load_dotenv()
 
@@ -58,6 +62,14 @@ def init_db():
         sender TEXT,
         message TEXT,
         timestamp TEXT
+    )''')
+
+    c.execute('''
+    CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT UNIQUE,
+    password TEXT,
+    role TEXT
     )''')
 
     conn.commit()
@@ -310,6 +322,21 @@ def telegram_webhook():
     return "ok"
 
 
+@app.route('/create-admin')
+def create_admin():
+    from werkzeug.security import generate_password_hash
+
+    conn = get_db()
+    c = conn.cursor()
+
+    c.execute("INSERT INTO users (username,password,role) VALUES (?,?,?)",
+              ("admin", generate_password_hash("admin123"), "admin"))
+
+    conn.commit()
+    conn.close()
+
+    return "Admin created"
+
 # ---------------- FILE ROUTES ----------------
 @app.route('/uploads/<filename>')
 def uploaded_file(filename):
@@ -460,6 +487,33 @@ def open_ticket(ticket_id):
 
 
 
+@app.route('/delete/<ticket_id>')
+def delete_ticket(ticket_id):
+    conn=get_db()
+    c=conn.cursor()
+    c.execute("DELETE FROM tickets WHERE id=?", (ticket_id,))
+    c.execute("DELETE FROM messages WHERE ticket_id=?", (ticket_id,))
+    conn.commit()
+    conn.close()
+    return "ok"
+
+
+@app.route('/assign/<ticket_id>', methods=['POST'])
+def assign(ticket_id):
+    agent = request.json.get("agent")
+    conn=get_db()
+    c=conn.cursor()
+    c.execute("UPDATE tickets SET assigned_to=? WHERE id=?", (agent,ticket_id))
+    conn.commit()
+    conn.close()
+    return "ok"
+
+
+@app.route('/ai/<ticket_id>')
+def ai_reply(ticket_id):
+    return jsonify({"reply":"Hello, we are reviewing your issue."})
+
+
 @app.route('/api/history/<ticket_id>')
 def history(ticket_id):
     conn = get_db()
@@ -498,6 +552,9 @@ def my_tickets():
 
 @app.route('/admin')
 def admin_dashboard():
+    if "admin" not in session:
+        return redirect("/admin-login")
+
     conn = get_db()
     c = conn.cursor()
 
@@ -509,10 +566,68 @@ def admin_dashboard():
     return render_template('admin.html', tickets=tickets)
 
 
+@app.route('/admin-login', methods=['GET','POST'])
+def admin_login():
+    if request.method == 'POST':
+        username = request.form.get('username')
+        password = request.form.get('password')
+
+        conn = get_db()
+        c = conn.cursor()
+
+        c.execute("SELECT * FROM users WHERE username=?", (username,))
+        user = c.fetchone()
+
+        conn.close()
+
+        if user and check_password_hash(user["password"], password):
+            session["admin"] = username
+            session["role"] = user["role"]
+            return redirect("/admin")
+
+        return "Invalid login"
+
+    return render_template("admin_login.html")
+
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    return redirect("/admin-login")
+
+
+@app.route('/admin/stats')
+def admin_stats():
+    if "admin" not in session:
+        return jsonify({"error": "Unauthorized"}), 403
+
+    conn = get_db()
+    c = conn.cursor()
+
+    c.execute("SELECT COUNT(*) FROM tickets")
+    total = c.fetchone()[0]
+
+    c.execute("SELECT COUNT(*) FROM tickets WHERE status='open'")
+    open_t = c.fetchone()[0]
+
+    c.execute("SELECT COUNT(*) FROM tickets WHERE status='closed'")
+    closed_t = c.fetchone()[0]
+
+    conn.close()
+
+    return jsonify({
+        "total": total,
+        "open": open_t,
+        "closed": closed_t
+    })
+
+
+
+
+
+
+
 # ---------------- SOCKET ----------------
-from flask_socketio import join_room
-
-
 @socketio.on('send_message')
 def handle_message(data):
 

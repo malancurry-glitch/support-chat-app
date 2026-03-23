@@ -73,9 +73,46 @@ body {
     background:white;
     border-bottom:1px solid #ddd;
     display:flex;
+    flex-direction:column;
+    gap:10px;
+}
+
+.top-bar {
+    display:flex;
     justify-content:space-between;
     align-items:center;
 }
+
+.analytics {
+    display:flex;
+    gap:15px;
+    font-size:13px;
+}
+
+.analytics div {
+    background:#eef2ff;
+    padding:6px 10px;
+    border-radius:8px;
+}
+
+.controls {
+    display:flex;
+    gap:8px;
+}
+
+button {
+    cursor:pointer;
+    padding:6px 10px;
+    border:none;
+    border-radius:6px;
+}
+
+.close { background:#ef4444; color:white; }
+.open { background:#22c55e; color:white; }
+.upload { background:#2563eb; color:white; }
+.delete { background:#111827; color:white; }
+.assign { background:#9333ea; color:white; }
+.ai { background:#f59e0b; color:white; }
 
 .messages {
     flex:1;
@@ -95,15 +132,9 @@ body {
 .user { background:#e0f2fe; }
 .admin { background:#dcfce7; align-self:flex-end; }
 
-.time {
-    font-size:10px;
-    opacity:0.6;
-}
-
 .bubble img, .bubble video {
     max-width:250px;
     border-radius:8px;
-    margin-top:5px;
 }
 
 .input-box {
@@ -116,27 +147,6 @@ input {
     flex:1;
     padding:10px;
 }
-
-.send {
-    margin-left:10px;
-    background:#2563eb;
-    color:white;
-}
-
-.controls {
-    display:flex;
-    gap:10px;
-}
-
-button {
-    cursor:pointer;
-    padding:6px 10px;
-    border:none;
-    border-radius:6px;
-}
-.close { background:#ef4444; color:white; }
-.open { background:#22c55e; color:white; }
-.upload { background:#2563eb; color:white; }
 </style>
 </head>
 
@@ -165,13 +175,25 @@ button {
 <div class="main">
 
 <div class="header">
+
+<div class="top-bar">
 <div id="ticketTitle">Select a ticket</div>
 
 <div class="controls">
+<button class="assign" onclick="assignAgent()">Assign</button>
+<button class="ai" onclick="aiReply()">AI</button>
 <button class="open" onclick="openTicket()">Open</button>
 <button class="close" onclick="closeTicket()">Close</button>
+<button class="delete" onclick="deleteTicket()">Delete</button>
 <button class="upload" onclick="uploadFile()">📎</button>
 <input type="file" id="fileInput" hidden>
+</div>
+</div>
+
+<div class="analytics">
+<div id="totalTickets">Total: 0</div>
+<div id="openTickets">Open: 0</div>
+<div id="closedTickets">Closed: 0</div>
 </div>
 
 </div>
@@ -180,7 +202,7 @@ button {
 
 <div class="input-box">
 <input id="messageInput" placeholder="Reply..." onkeypress="handleKey(event)">
-<button class="send" onclick="sendReply()">Send</button>
+<button onclick="sendReply()">Send</button>
 </div>
 
 </div>
@@ -189,42 +211,45 @@ button {
 let socket = io();
 let currentTicket = null;
 let currentStatus = "open";
-let unreadMap = {};
 
 const messagesEl = document.getElementById("messages");
 const titleEl = document.getElementById("ticketTitle");
 const inputEl = document.getElementById("messageInput");
 const fileInput = document.getElementById("fileInput");
 
-// 🔔 enable notifications
-if ("Notification" in window) {
-    Notification.requestPermission();
-}
+// 📊 ANALYTICS FIX
+function updateAnalytics(){
+    let tickets = document.querySelectorAll(".ticket");
+    let open = 0, closed = 0;
 
-// 🔊 sound
-let audio = new Audio("https://actions.google.com/sounds/v1/alarms/beep_short.ogg");
-
-// CLICK
-document.querySelectorAll(".ticket").forEach(el=>{
-    el.addEventListener("click", ()=>{
-        loadTicket(el.dataset.id, el);
+    tickets.forEach(t=>{
+        let txt = t.innerText.toLowerCase();
+        if(txt.includes("closed")) closed++;
+        else open++;
     });
-});
+
+    totalTickets.innerText="Total: "+tickets.length;
+    openTickets.innerText="Open: "+open;
+    closedTickets.innerText="Closed: "+closed;
+}
+updateAnalytics();
 
 // LOAD
-function loadTicket(id, el){
-    currentTicket = id;
-    unreadMap[id] = 0;
+document.querySelectorAll(".ticket").forEach(el=>{
+    el.onclick=()=>loadTicket(el.dataset.id, el);
+});
 
-    socket.emit("join_ticket", { ticket_id:id });
+function loadTicket(id, el){
+    currentTicket=id;
+
+    socket.emit("join_ticket",{ticket_id:id});
 
     document.querySelectorAll(".ticket").forEach(t=>t.classList.remove("active-ticket"));
     el.classList.add("active-ticket");
 
-    let statusText = el.innerText.toLowerCase();
-    currentStatus = statusText.includes("closed") ? "closed" : "open";
+    currentStatus = el.innerText.includes("closed") ? "closed":"open";
 
-    titleEl.innerText = "Ticket: "+id+" ("+currentStatus+")";
+    titleEl.innerText="Ticket: "+id+" ("+currentStatus+")";
 
     fetch(`/api/history/${id}`)
     .then(res=>res.json())
@@ -232,49 +257,44 @@ function loadTicket(id, el){
         messagesEl.innerHTML="";
         data.forEach(m=>addMessage(m.message,m.sender,m.time));
     });
-
-    updateUnreadUI(el, 0);
 }
 
-// ADD MESSAGE
+// 🔥 FIXED MEDIA SUPPORT
 function addMessage(msg,sender,time=""){
     let div=document.createElement("div");
     div.className="bubble "+sender;
 
     if(msg.startsWith("[FILE]")){
-        let file = msg.replace("[FILE] ","");
-        let url = "/uploads/" + file;
-        let ext = file.split('.').pop().toLowerCase();
+        let file=msg.replace("[FILE] ","");
+        let url="/uploads/"+file;
+        let ext=file.split('.').pop().toLowerCase();
 
         if(["jpg","jpeg","png","gif","webp"].includes(ext)){
-            div.innerHTML = `<img src="${url}">`;
+            div.innerHTML=`<img src="${url}">`;
         }
         else if(["mp4","webm","ogg"].includes(ext)){
-            div.innerHTML = `<video controls><source src="${url}"></video>`;
+            div.innerHTML=`<video controls><source src="${url}"></video>`;
         }
         else{
-            div.innerHTML = `<a href="${url}" target="_blank">📎 ${file}</a>`;
+            div.innerHTML=`<a href="${url}" target="_blank">📎 ${file}</a>`;
         }
 
         div.innerHTML += `<br><a href="/download/${file}">⬇ Download</a>`;
     } else {
-        div.innerText = msg;
+        div.innerText=msg;
     }
 
-    div.innerHTML += `<div class="time">${time}</div>`;
+    div.innerHTML+=`<div style="font-size:10px">${time}</div>`;
     messagesEl.appendChild(div);
     messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
 // SEND
 function sendReply(){
-    if(currentStatus==="closed"){
-        alert("Ticket is closed");
-        return;
-    }
+    if(currentStatus==="closed") return alert("Ticket closed");
 
     let msg=inputEl.value.trim();
-    if(!msg || !currentTicket) return;
+    if(!msg) return;
 
     socket.emit('send_message',{
         ticket_id:currentTicket,
@@ -282,90 +302,73 @@ function sendReply(){
         message:msg
     });
 
-    addMessage(msg,'admin');
+    addMessage(msg,"admin");
     inputEl.value="";
 }
 
 // FILE
 function uploadFile(){
-    if(currentStatus==="closed"){
-        alert("Ticket is closed");
-        return;
-    }
+    if(!currentTicket) return alert("Select ticket first");
     fileInput.click();
 }
 
-fileInput.onchange = ()=>{
-    let file = fileInput.files[0];
+fileInput.onchange=()=>{
+    let file=fileInput.files[0];
     if(!file) return;
 
-    let form = new FormData();
-    form.append("file", file);
+    let form=new FormData();
+    form.append("file",file);
 
-    fetch(`/upload/${currentTicket}`,{
-        method:"POST",
-        body:form
-    }).then(()=>{
-        addMessage("[FILE] "+file.name,"admin");
-    });
+    fetch(`/upload/${currentTicket}`,{method:"POST",body:form})
+    .then(()=>addMessage("[FILE] "+file.name,"admin"));
 };
 
-// CLOSE
+// ACTIONS
 function closeTicket(){
-    fetch(`/close/${currentTicket}`).then(()=>{
-        currentStatus="closed";
-        titleEl.innerText="Ticket: "+currentTicket+" (closed)";
-    });
+    fetch(`/close/${currentTicket}`).then(()=>location.reload());
 }
 
-// OPEN
 function openTicket(){
-    fetch(`/open/${currentTicket}`).then(()=>{
-        currentStatus="open";
-        titleEl.innerText="Ticket: "+currentTicket+" (open)";
+    fetch(`/open/${currentTicket}`).then(()=>location.reload());
+}
+
+function deleteTicket(){
+    if(confirm("Delete ticket?")){
+        fetch(`/delete/${currentTicket}`).then(()=>location.reload());
+    }
+}
+
+function assignAgent(){
+    let name=prompt("Assign agent:");
+    if(!name) return;
+
+    fetch(`/assign/${currentTicket}`,{
+        method:"POST",
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({agent:name})
     });
 }
 
-// SEARCH
+function aiReply(){
+    fetch(`/ai/${currentTicket}`)
+    .then(res=>res.json())
+    .then(d=>inputEl.value=d.reply);
+}
+
 function filterTickets(){
     let q=document.getElementById("search").value.toLowerCase();
     document.querySelectorAll(".ticket").forEach(t=>{
-        t.style.display = t.innerText.toLowerCase().includes(q) ? "block":"none";
+        t.style.display=t.innerText.toLowerCase().includes(q)?"block":"none";
     });
-}
-
-// 🔴 UNREAD UI
-function updateUnreadUI(el,count){
-    let badge = el.querySelector(".unread");
-    if(!badge){
-        badge = document.createElement("div");
-        badge.className="unread";
-        el.appendChild(badge);
-    }
-    badge.innerText=count;
-    badge.style.display = count>0 ? "block":"none";
 }
 
 // REALTIME
 socket.on('new_message',data=>{
-    let ticketEl = document.querySelector(`[data-id="${data.ticket_id}"]`);
-
-    if(data.ticket_id===currentTicket){
+    if(String(data.ticket_id)===String(currentTicket)){
         addMessage(data.message,data.sender,data.time);
-    } else {
-        unreadMap[data.ticket_id] = (unreadMap[data.ticket_id]||0)+1;
-        if(ticketEl) updateUnreadUI(ticketEl, unreadMap[data.ticket_id]);
-
-        // 🔔 notification
-        if(Notification.permission==="granted"){
-            new Notification("New Ticket Reply", { body:data.message });
-        }
-
-        audio.play();
     }
 });
 
-// ENTER
 function handleKey(e){
     if(e.key==="Enter") sendReply();
 }
