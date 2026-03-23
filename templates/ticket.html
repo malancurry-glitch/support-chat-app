@@ -112,14 +112,13 @@ var ticket_id = "{{ticket_id}}";
 const box = document.getElementById("messages");
 const typingEl = document.getElementById("typing");
 
-let agents = {};
 let activeAgents = [];
 let assignedAgent = null;
 
 // JOIN ROOM
 socket.emit("join_ticket", { ticket_id });
 
-// 🔥 SLA TIMER
+// SLA TIMER
 let start = Date.now();
 setInterval(()=>{
     let diff = 300000 - (Date.now()-start);
@@ -127,7 +126,7 @@ setInterval(()=>{
     slaTimer.innerText = "Response SLA: " + Math.floor(diff/1000) + "s";
 },1000);
 
-// 🔥 SYSTEM MESSAGE
+// SYSTEM MESSAGE
 function system(msg){
     let div=document.createElement("div");
     div.className="system";
@@ -136,7 +135,7 @@ function system(msg){
     scroll();
 }
 
-// 🔥 ADD MESSAGE
+// ADD MESSAGE
 function addMessage(msg,sender,time="",agent="S"){
     let row=document.createElement("div");
     row.className="msg-row";
@@ -183,7 +182,7 @@ function addMessage(msg,sender,time="",agent="S"){
 // SCROLL
 function scroll(){ box.scrollTop=box.scrollHeight; }
 
-// 🔥 LOAD HISTORY (IMPORTANT FIX)
+// LOAD HISTORY
 fetch(`/api/history/${ticket_id}`)
 .then(res=>res.json())
 .then(data=>{
@@ -192,7 +191,7 @@ fetch(`/api/history/${ticket_id}`)
     });
 });
 
-// 🔥 SEND
+// SEND
 function sendMessage(){
     let msg=messageInput.value.trim();
     if(!msg) return;
@@ -203,9 +202,7 @@ function sendMessage(){
 }
 
 // FILE
-function upload(){
-    fileInput.click();
-}
+function upload(){ fileInput.click(); }
 
 fileInput.onchange=()=>{
     let file=fileInput.files[0];
@@ -213,23 +210,25 @@ fileInput.onchange=()=>{
     form.append("file",file);
 
     fetch(`/upload/${ticket_id}`,{method:"POST",body:form})
-    .then(()=>addMessage("[FILE] "+file.name,"user",new Date().toLocaleTimeString()));
+    .then(()=>addMessage("[FILE] "+file.name,"user"));
 };
 
-// 🔥 REALTIME MESSAGE
+// REALTIME MESSAGE
 socket.on("new_message",data=>{
     if(data.ticket_id==ticket_id){
         addMessage(data.message,data.sender,data.time,data.agent||"S");
     }
 });
 
-// 🔥 AUTO ASSIGN (LEAST BUSY AGENT)
+// 🔥 AUTO ASSIGN FIRST AGENT (QUEUE SYSTEM)
 socket.on("agent_join",data=>{
-    activeAgents.push(data.agent);
+    if(!activeAgents.includes(data.agent)){
+        activeAgents.push(data.agent);
+    }
 
     if(!assignedAgent){
         assignedAgent = data.agent;
-        system(`<b>${assignedAgent}</b> is assigned to you`);
+        system(`<b>${assignedAgent}</b> is now handling your request`);
     }
 
     system(`<b>${data.agent}</b> joined the chat<br>${data.time}`);
@@ -242,8 +241,11 @@ socket.on("agent_leave",data=>{
 
     if(assignedAgent === data.agent){
         assignedAgent = activeAgents[0] || null;
+
         if(assignedAgent){
             system(`Now handled by <b>${assignedAgent}</b>`);
+        } else {
+            system("Waiting for available agent...");
         }
     }
 
@@ -251,22 +253,24 @@ socket.on("agent_leave",data=>{
     updateStatus();
 });
 
-// 🔥 CHAT TRANSFER
+// 🔥 TRANSFER
 socket.on("agent_transfer",data=>{
     assignedAgent = data.to;
     system(`Chat transferred to <b>${data.to}</b>`);
 });
 
-// 🔥 TYPING PER AGENT
+// 🔥 TYPING
 socket.on("typing",data=>{
-    typingEl.innerText = data.agent + " is typing...";
-    setTimeout(()=>typingEl.innerText="",1000);
+    if(data.agent === assignedAgent){
+        typingEl.innerText = data.agent + " is typing...";
+        setTimeout(()=>typingEl.innerText="",1000);
+    }
 });
 
-// 🔥 AGENT PRESENCE
+// 🔥 STATUS
 function updateStatus(){
-    if(activeAgents.length>0){
-        agentStatus.innerText = "● Agents Online ("+activeAgents.length+")";
+    if(assignedAgent){
+        agentStatus.innerText = "● " + assignedAgent;
     } else {
         agentStatus.innerText = "● Waiting...";
     }
