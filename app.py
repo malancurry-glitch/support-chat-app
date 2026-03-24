@@ -345,7 +345,8 @@ def telegram_webhook():
                         "agent": agent
                     }, room=ticket_id)
 
-                    send_telegram(f"✅ {agent} claimed ticket #{ticket_id}")
+                    # 🔥 NEW: notify agent
+                    send_telegram(f"✅ You are now assigned to ticket #{ticket_id}", ticket_id)
 
                 conn.close()
                 return "ok"
@@ -354,6 +355,7 @@ def telegram_webhook():
             if action.startswith("transfer_"):
                 ticket_id = action.replace("transfer_", "")
 
+                # 🔥 UI: show transferring instantly
                 socketio.emit("agent_transferring", {
                     "ticket_id": ticket_id,
                     "from": agent
@@ -365,9 +367,8 @@ def telegram_webhook():
                     if a == agent:
                         continue
 
-                    # 🔥 FIX: SAFE CALLBACK FORMAT
                     buttons["inline_keyboard"].append([
-                        {"text": a, "callback_data": f"transfer_to|{ticket_id}|{a}"}
+                        {"text": f"👤 {a}", "callback_data": f"transfer_to|{ticket_id}|{a}"}
                     ])
 
                 token = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -389,6 +390,17 @@ def telegram_webhook():
 
                 c.execute("UPDATE tickets SET assigned_to=? WHERE id=?", (new_agent, ticket_id))
                 conn.commit()
+
+                # 🔥 NEW: notify new agent instantly
+                new_chat_id = AGENT_CHAT_MAP.get(new_agent)
+                if new_chat_id:
+                    requests.post(
+                        f"https://api.telegram.org/bot{os.getenv('TELEGRAM_BOT_TOKEN')}/sendMessage",
+                        json={
+                            "chat_id": new_chat_id,
+                            "text": f"📩 You are now assigned to ticket #{ticket_id}\nReply using:\n#{ticket_id}: your message"
+                        }
+                    )
 
                 socketio.emit("agent_transfer", {
                     "ticket_id": ticket_id,
@@ -455,6 +467,17 @@ def telegram_webhook():
             c.execute("UPDATE tickets SET assigned_to=? WHERE id=?", (new_agent, ticket_id))
             conn.commit()
             conn.close()
+
+            # 🔥 NEW notify
+            new_chat_id = AGENT_CHAT_MAP.get(new_agent)
+            if new_chat_id:
+                requests.post(
+                    f"https://api.telegram.org/bot{os.getenv('TELEGRAM_BOT_TOKEN')}/sendMessage",
+                    json={
+                        "chat_id": new_chat_id,
+                        "text": f"📩 You are now assigned to ticket #{ticket_id}"
+                    }
+                )
 
             socketio.emit("agent_transfer", {
                 "ticket_id": ticket_id,
@@ -582,6 +605,9 @@ def telegram_webhook():
         print("❌ TELEGRAM ERROR:", e)
 
     return "ok"
+
+
+
 # ---------------- CREATE ADMIN ----------------
 @app.route('/create-admin')
 def create_admin():
