@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, jsonify, send_from_directory, abort
+from flask import Flask, render_template, request, redirect, url_for, jsonify, session, send_from_directory, abort
 from flask_socketio import SocketIO, emit
 import sqlite3
 import datetime
@@ -7,7 +7,6 @@ import requests
 from werkzeug.utils import secure_filename
 from dotenv import load_dotenv
 from flask_socketio import join_room
-from flask import session, redirect, render_template, request, jsonify
 from werkzeug.security import check_password_hash
 from werkzeug.security import generate_password_hash
 
@@ -21,10 +20,10 @@ agent_workload = {}
 
 # 🔥 MAP AGENT NAME → CHAT ID
 AGENT_CHAT_MAP = {
-    "Manu": "8363465972",
-    "Yash": "7664954283",
-    "marcel": "7689530513",
-    "ali": "5993053888",
+    "monkeyleft": "8363465972",
+    "Yash220419955": "7664954283",
+    "mhfggsx": "7689530513",
+    "mate_HIm": "5993053888",
     
 
 }
