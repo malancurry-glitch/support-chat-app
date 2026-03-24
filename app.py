@@ -932,9 +932,13 @@ def admin_stats():
 def handle_message(data):
     try:
         now = datetime.datetime.now().strftime('%H:%M')
-        ticket_id = str(data.get('ticket_id')).strip()
+
+        ticket_id = str(data.get('ticket_id', '')).strip()
         sender = data.get('sender')
-        message = data.get('message').strip()
+        message = (data.get('message') or "").strip()
+
+        if not ticket_id or not message:
+            return
 
         conn = get_db()
         c = conn.cursor()
@@ -943,11 +947,13 @@ def handle_message(data):
         row = c.fetchone()
         assigned_to = row["assigned_to"] if row else None
 
-        agent_name = session.get("admin", "Agent")
+        # 🔥 FIX: SAFE LOWERCASE AGENT NAME
+        agent_name = (session.get("admin") or "agent").lower()
 
-        # 🔥 AUTO ASSIGN FIRST RESPONDER
+        # ---------------- ADMIN MESSAGE ----------------
         if sender == "admin":
 
+            # 🔥 AUTO ASSIGN FIRST RESPONDER
             if not assigned_to:
                 assigned_to = agent_name
 
@@ -964,6 +970,17 @@ def handle_message(data):
                     "agent": agent_name
                 }, room=ticket_id)
 
+                # 🔥 NEW: notify Telegram agent
+                chat_id = AGENT_CHAT_MAP.get(agent_name)
+                if chat_id:
+                    requests.post(
+                        f"https://api.telegram.org/bot{os.getenv('TELEGRAM_BOT_TOKEN')}/sendMessage",
+                        json={
+                            "chat_id": chat_id,
+                            "text": f"📩 You are now assigned to ticket #{ticket_id}"
+                        }
+                    )
+
             # 🔥 LOCK SYSTEM
             elif assigned_to != agent_name:
                 socketio.emit("blocked", {
@@ -971,7 +988,7 @@ def handle_message(data):
                 })
                 return
 
-        # SAVE MESSAGE
+        # ---------------- SAVE MESSAGE ----------------
         c.execute(
             "INSERT INTO messages VALUES (NULL, ?, ?, ?, ?)",
             (ticket_id, sender, message, now)
@@ -980,6 +997,7 @@ def handle_message(data):
         conn.commit()
         conn.close()
 
+        # ---------------- TELEGRAM SEND ----------------
         send_telegram(f"""
 💬 Message
 
@@ -987,8 +1005,9 @@ Ticket: #{ticket_id}
 From: {agent_name}
 
 {message}
-""")
+""", ticket_id)
 
+        # ---------------- REALTIME ----------------
         socketio.emit('new_message', {
             "ticket_id": ticket_id,
             "message": message,
@@ -1006,7 +1025,9 @@ From: {agent_name}
 @socketio.on('agent_join')
 def agent_join(data):
     ticket_id = str(data.get('ticket_id')).strip()
-    agent_name = session.get("admin", "Agent")
+
+    agent_name = (session.get("admin") or "agent").lower()
+
     now = datetime.datetime.now().strftime('%d %b %Y, %I:%M %p')
 
     socketio.emit('agent_join', {
@@ -1014,10 +1035,15 @@ def agent_join(data):
         "time": now
     }, room=ticket_id)
 
+
+
+
 @socketio.on('agent_leave')
 def agent_leave(data):
     ticket_id = str(data.get('ticket_id')).strip()
-    agent_name = session.get("admin", "Agent")
+
+    agent_name = (session.get("admin") or "agent").lower()
+
     now = datetime.datetime.now().strftime('%d %b %Y, %I:%M %p')
 
     socketio.emit('agent_leave', {
@@ -1029,8 +1055,17 @@ def agent_leave(data):
 
 @socketio.on("agent_transfer")
 def agent_transfer(data):
-    socketio.emit("agent_transfer", data, room=data["ticket_id"])
+    ticket_id = data.get("ticket_id")
+    new_agent = data.get("to")
 
+    # 🔥 update workload safely
+    for agent in agent_workload:
+        if agent == new_agent:
+            agent_workload[agent] += 1
+        else:
+            agent_workload[agent] = max(0, agent_workload.get(agent, 1) - 1)
+
+    socketio.emit("agent_transfer", data, room=ticket_id)
 
 
 

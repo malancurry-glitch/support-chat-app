@@ -111,7 +111,6 @@ const box = document.getElementById("messages");
 const typingEl = document.getElementById("typing");
 const agentStatus = document.getElementById("agentStatus");
 
-let activeAgents = [];
 let assignedAgent = null;
 
 // JOIN ROOM
@@ -135,13 +134,15 @@ function system(msg){
 }
 
 // ADD MESSAGE
-function addMessage(msg,sender,time="",agent="S"){
+function addMessage(msg,sender,time="",agent="Agent"){
     let row=document.createElement("div");
     row.className="msg-row";
 
     let avatar=document.createElement("div");
     avatar.className="avatar " + (sender==="user"?"user-avatar":"admin-avatar");
-    avatar.innerText = sender==="user"?"U":agent[0];
+
+    // 🔥 FIX: SAFE AVATAR
+    avatar.innerText = sender==="user" ? "U" : (agent ? agent[0].toUpperCase() : "A");
 
     let bubble=document.createElement("div");
     bubble.className="bubble "+sender;
@@ -186,7 +187,7 @@ fetch(`/api/history/${ticket_id}`)
 .then(res=>res.json())
 .then(data=>{
     data.forEach(m=>{
-        addMessage(m.message,m.sender,m.time,m.agent||"S");
+        addMessage(m.message,m.sender,m.time,m.agent);
     });
 });
 
@@ -215,7 +216,7 @@ fileInput.onchange=()=>{
 // REALTIME MESSAGE
 socket.on("new_message",data=>{
     if(data.ticket_id==ticket_id){
-        addMessage(data.message,data.sender,data.time,data.agent||"S");
+        addMessage(data.message,data.sender,data.time,data.agent);
     }
 });
 
@@ -223,12 +224,14 @@ socket.on("new_message",data=>{
 socket.on("assigned", data=>{
     if(data.ticket_id == ticket_id){
         assignedAgent = data.agent;
+
         system(`<b>${assignedAgent}</b> is assigned to your ticket`);
+
         agentStatus.innerText = "● Assigned to " + assignedAgent;
     }
 });
 
-// 🔥 TRANSFERRING (NEW)
+// 🔥 TRANSFERRING
 socket.on("agent_transferring", data=>{
     if(data.ticket_id == ticket_id){
         system(`🔁 <b>${data.from}</b> is transferring your chat...`);
@@ -240,7 +243,9 @@ socket.on("agent_transferring", data=>{
 socket.on("agent_transfer",data=>{
     if(data.ticket_id == ticket_id){
         assignedAgent = data.to;
+
         system(`🔁 Chat transferred to <b>${data.to}</b>`);
+
         agentStatus.innerText = "● Assigned to " + data.to;
     }
 });
