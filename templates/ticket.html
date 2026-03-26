@@ -234,6 +234,16 @@ socket.on("typing",data=>{
 function goBack(){
     window.location.href="/my-tickets";
 }
+socket.on("ticket_closed", data => {
+    // 🔥 Update status
+    document.getElementById("agentStatus").innerText = "🔒 Closed";
+
+    // 🔥 Show system message
+    system("🔒 This ticket has been closed");
+
+    // 🔥 Disable input
+    document.getElementById("messageInput").disabled = true;
+});
 
 // INIT
 window.onload=()=>{
