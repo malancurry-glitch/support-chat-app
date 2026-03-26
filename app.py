@@ -364,11 +364,18 @@ def telegram_webhook():
         import re
 
         data = request.get_json(force=True)
+        print("🔥 TELEGRAM HIT:", data)
 
         # ---------------- BUTTON CLICK ----------------
         if "callback_query" in data:
             query = data["callback_query"]
             action = query["data"]
+
+            # 🔥 REQUIRED: ACKNOWLEDGE BUTTON CLICK
+            requests.post(
+                f"https://api.telegram.org/bot{os.getenv('TELEGRAM_BOT_TOKEN')}/answerCallbackQuery",
+                json={"callback_query_id": query["id"]}
+            )
 
             user = query["from"]
             agent = (user.get("username") or user.get("first_name") or "").lower().strip()
@@ -501,7 +508,7 @@ def telegram_webhook():
                 return "ok"
 
         # ---------------- NORMAL MESSAGE ----------------
-        msg_obj = data.get("message")
+        msg_obj = data.get("message") or data.get("edited_message")
         if not msg_obj:
             return "ok"
 
@@ -517,9 +524,9 @@ def telegram_webhook():
         conn = get_db()
         c = conn.cursor()
 
-        text = msg_obj.get("text", "").strip()
+        text = (msg_obj.get("text") or "").strip()
+        print("📩 MESSAGE:", text)
 
-        # ---------------- TEXT ----------------
         match = re.match(r"#?\s*(\d+)\s*:\s*(.+)", text)
         if not match:
             send_telegram("❌ Use: #123456: message")
@@ -529,7 +536,6 @@ def telegram_webhook():
         ticket_id = match.group(1)
         msg = match.group(2)
 
-        # 🔥 TAG AFTER ticket_id exists
         if "refund" in msg.lower():
             TICKET_TAGS.setdefault(ticket_id, []).append("refund")
 
