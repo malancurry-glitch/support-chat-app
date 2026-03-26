@@ -83,10 +83,12 @@ def init_db():
         name TEXT,
         email TEXT,
         subject TEXT,
-        priority TEXT,
-        status TEXT,
+        priority TEXT DEFAULT 'Medium',
+        status TEXT DEFAULT 'open',
         assigned_to TEXT,
-        created_at TEXT
+        created_at TEXT,
+        tags TEXT DEFAULT '',
+        updated_at TEXT
     )''')
 
     c.execute('''
@@ -107,20 +109,27 @@ def init_db():
     )''')
 
     # ---------------- SAFE UPGRADES ----------------
-    try:
-        c.execute("ALTER TABLE tickets ADD COLUMN tags TEXT")
-    except:
-        pass
+    # (for old databases already created)
 
-    try:
-        c.execute("ALTER TABLE tickets ADD COLUMN updated_at TEXT")
-    except:
-        pass
+    def safe_add_column(query):
+        try:
+            c.execute(query)
+        except Exception:
+            pass
+
+    safe_add_column("ALTER TABLE tickets ADD COLUMN tags TEXT DEFAULT ''")
+    safe_add_column("ALTER TABLE tickets ADD COLUMN updated_at TEXT")
+    safe_add_column("ALTER TABLE tickets ADD COLUMN last_reply_at TEXT")
+    safe_add_column("ALTER TABLE tickets ADD COLUMN closed_at TEXT")
 
     conn.commit()
     conn.close()
 
+
+# 🔥 RUN ON START
 init_db()
+
+
 
 # ---------------- TICKET ID ----------------
 def generate_ticket_id():
@@ -381,11 +390,47 @@ def telegram_webhook():
             agent = (user.get("username") or user.get("first_name") or "").lower().strip()
             chat_id = str(user["id"])
 
+            if not agent:
+                return "ok"
+
             AGENT_CHAT_MAP[agent] = chat_id
             ONLINE_AGENTS.add(agent)
 
             conn = get_db()
             c = conn.cursor()
+
+            # ---------------- TRANSFER SELECT (FIRST FIX!) ----------------
+            if action.startswith("transfer_to|"):
+                _, ticket_id, new_agent = action.split("|")
+
+                c.execute("SELECT assigned_to FROM tickets WHERE id=?", (ticket_id,))
+                row = c.fetchone()
+                old_agent = row["assigned_to"] if row else None
+
+                if new_agent == old_agent:
+                    send_telegram("❌ Already assigned")
+                    conn.close()
+                    return "ok"
+
+                c.execute("UPDATE tickets SET assigned_to=? WHERE id=?", (new_agent, ticket_id))
+                conn.commit()
+
+                # workload update
+                if old_agent:
+                    agent_workload[old_agent] = max(0, agent_workload.get(old_agent, 1) - 1)
+
+                agent_workload[new_agent] = agent_workload.get(new_agent, 0) + 1
+
+                send_telegram(f"📩 Assigned to #{ticket_id}", ticket_id)
+                send_telegram(f"ℹ️ Ticket transferred to {new_agent}", ticket_id)
+
+                socketio.emit("agent_transfer", {
+                    "ticket_id": ticket_id,
+                    "to": new_agent
+                }, room=ticket_id)
+
+                conn.close()
+                return "ok"
 
             # ---------------- CLAIM ----------------
             if action.startswith("claim_"):
@@ -412,7 +457,7 @@ def telegram_webhook():
                 conn.close()
                 return "ok"
 
-            # ---------------- TRANSFER ----------------
+            # ---------------- TRANSFER MENU ----------------
             if action.startswith("transfer_"):
                 ticket_id = action.replace("transfer_", "")
 
@@ -446,38 +491,6 @@ def telegram_webhook():
                 conn.close()
                 return "ok"
 
-            # ---------------- TRANSFER SELECT ----------------
-            if action.startswith("transfer_to|"):
-                _, ticket_id, new_agent = action.split("|")
-
-                c.execute("SELECT assigned_to FROM tickets WHERE id=?", (ticket_id,))
-                row = c.fetchone()
-                old_agent = row["assigned_to"] if row else None
-
-                if new_agent == old_agent:
-                    send_telegram("❌ Already assigned")
-                    conn.close()
-                    return "ok"
-
-                c.execute("UPDATE tickets SET assigned_to=? WHERE id=?", (new_agent, ticket_id))
-                conn.commit()
-
-                if old_agent:
-                    agent_workload[old_agent] = max(0, agent_workload.get(old_agent, 1) - 1)
-
-                agent_workload[new_agent] = agent_workload.get(new_agent, 0) + 1
-
-                send_telegram(f"📩 Assigned to #{ticket_id}", ticket_id)
-                send_telegram(f"ℹ️ Ticket transferred to {new_agent}", ticket_id)
-
-                socketio.emit("agent_transfer", {
-                    "ticket_id": ticket_id,
-                    "to": new_agent
-                }, room=ticket_id)
-
-                conn.close()
-                return "ok"
-
             # ---------------- PRIORITY ----------------
             if action.startswith("priority_"):
                 ticket_id = action.split("_")[1]
@@ -486,7 +499,7 @@ def telegram_webhook():
                 conn.close()
                 return "ok"
 
-            # ---------------- AI REPLY ----------------
+            # ---------------- AI ----------------
             if action.startswith("ai_"):
                 ticket_id = action.split("_")[1]
                 send_telegram(f"🤖 Suggested reply:\nHello, we are reviewing your issue.", ticket_id)
@@ -501,7 +514,6 @@ def telegram_webhook():
                 conn.commit()
 
                 socketio.emit("ticket_closed", {}, room=ticket_id)
-
                 send_telegram(f"🔒 Ticket #{ticket_id} closed")
 
                 conn.close()
@@ -517,6 +529,9 @@ def telegram_webhook():
         user = msg_obj.get("from", {})
         agent = (user.get("username") or user.get("first_name") or "").lower().strip()
         chat_id = str(msg_obj.get("chat", {}).get("id"))
+
+        if not agent:
+            return "ok"
 
         AGENT_CHAT_MAP[agent] = chat_id
         ONLINE_AGENTS.add(agent)
@@ -536,6 +551,7 @@ def telegram_webhook():
         ticket_id = match.group(1)
         msg = match.group(2)
 
+        # tag
         if "refund" in msg.lower():
             TICKET_TAGS.setdefault(ticket_id, []).append("refund")
 
@@ -612,10 +628,28 @@ def create_ticket():
         c = conn.cursor()
 
         # CREATE TICKET
-        c.execute(
-            "INSERT INTO tickets VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (ticket_id, name, email, subject, "Medium", "open", None, now)
-        )
+        c.execute("""
+INSERT INTO tickets (
+    id, name, email, subject,
+    priority, status, assigned_to,
+    created_at, tags, updated_at,
+    last_reply_at, closed_at
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+""", (
+    ticket_id,
+    name,
+    email,
+    subject,
+    "Medium",
+    "open",
+    None,
+    now,
+    "",          # tags
+    now,         # updated_at
+    None,        # last_reply_at
+    None         # closed_at
+))
 
         # SAVE MESSAGE
         c.execute(
