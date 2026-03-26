@@ -1,46 +1,59 @@
 from flask import Flask, render_template, request, redirect, url_for, jsonify, session, send_from_directory, abort
-from flask_socketio import SocketIO, emit
+from flask_socketio import SocketIO, emit, join_room
 import sqlite3
 import datetime
 import os
 import requests
+import logging
+import random
+
 from werkzeug.utils import secure_filename
+from werkzeug.security import check_password_hash, generate_password_hash
 from dotenv import load_dotenv
-from flask_socketio import join_room
-from werkzeug.security import check_password_hash
-from werkzeug.security import generate_password_hash
 
-
+# ---------------- LOAD ENV ----------------
 load_dotenv()
 
+# ---------------- LOGGING ----------------
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s | %(levelname)s | %(message)s"
+)
 
+# ---------------- GLOBAL STATE ----------------
 TRANSFER_STATE = {}
-# 🔥 AGENT WORKLOAD TRACKER (PUT IT HERE)
 agent_workload = {}
 
-# 🔥 MAP AGENT NAME → CHAT ID
+# 🔥 ALWAYS USE LOWERCASE KEYS (IMPORTANT)
 AGENT_CHAT_MAP = {
     "monkeyleft": "8363465972",
-    "Yash220419955": "7664954283",
+    "yash220419955": "7664954283",
     "mhfggsx": "7689530513",
-    "mate_HIm": "5993053888",
-    
-
+    "mate_him": "5993053888",
 }
 
+ONLINE_AGENTS = set()
+TICKET_PRIORITY = {}
+TICKET_TAGS = {}
+INTERNAL_NOTES = {}
 
+# ---------------- APP ----------------
 app = Flask(__name__, template_folder="templates")
 app.secret_key = os.getenv("SECRET_KEY", "dev-secret")
 
 socketio = SocketIO(app, cors_allowed_origins="*")
 
+# ---------------- FILE SYSTEM ----------------
 UPLOAD_FOLDER = 'uploads'
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
-ALLOWED_EXTENSIONS = {'png','jpg','jpeg','gif','webp','mp4','webm','pdf','txt'}
-
+ALLOWED_EXTENSIONS = {
+    'png','jpg','jpeg','gif','webp',
+    'mp4','webm',
+    'pdf','txt'
+}
 
 # ---------------- HELPERS ----------------
 def allowed_file(filename):
@@ -48,10 +61,15 @@ def allowed_file(filename):
 
 
 def get_db():
-    conn = sqlite3.connect('database.db')
+    conn = sqlite3.connect('database.db', timeout=10)
     conn.row_factory = sqlite3.Row
     return conn
 
+
+def debug_log(title, data=None):
+    logging.debug(f"\n🔥 {title}")
+    if data:
+        logging.debug(data)
 
 # ---------------- INIT DB ----------------
 def init_db():
@@ -81,10 +99,10 @@ def init_db():
 
     c.execute('''
     CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT UNIQUE,
-    password TEXT,
-    role TEXT
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT UNIQUE,
+        password TEXT,
+        role TEXT
     )''')
 
     conn.commit()
@@ -92,18 +110,14 @@ def init_db():
 
 init_db()
 
-
 # ---------------- TICKET ID ----------------
-import random
-
 def generate_ticket_id():
     conn = get_db()
     c = conn.cursor()
 
     while True:
-        ticket_id = str(random.randint(100000, 999999))  # 6-digit ID
+        ticket_id = str(random.randint(100000, 999999))
 
-        # check if exists (avoid duplicates)
         c.execute("SELECT id FROM tickets WHERE id=?", (ticket_id,))
         if not c.fetchone():
             break
@@ -128,7 +142,7 @@ def send_telegram(text, ticket_id=None):
 
         conn.close()
 
-        # 🔥 BEFORE ASSIGNMENT → SEND TO ALL
+        # 🔥 BEFORE ASSIGNMENT → SEND TO ALL AGENTS
         if not assigned:
             chat_ids = os.getenv("TELEGRAM_CHAT_IDS", "").split(",")
 
@@ -137,34 +151,39 @@ def send_telegram(text, ticket_id=None):
                 if not chat_id:
                     continue
 
-                requests.post(
+                res = requests.post(
                     f"https://api.telegram.org/bot{token}/sendMessage",
                     json={"chat_id": chat_id, "text": text},
                     timeout=10
                 )
 
-        # 🔥 AFTER ASSIGNMENT → SEND ONLY TO ONE AGENT
+                print("📤 TELEGRAM ALL:", chat_id, res.status_code, res.text)
+
+        # 🔥 AFTER ASSIGNMENT → SEND ONLY TO ASSIGNED AGENT
         else:
             chat_id = AGENT_CHAT_MAP.get(assigned)
 
             if chat_id:
-                requests.post(
+                res = requests.post(
                     f"https://api.telegram.org/bot{token}/sendMessage",
                     json={"chat_id": chat_id, "text": text},
                     timeout=10
                 )
 
+                print("📤 TELEGRAM ASSIGNED:", assigned, res.status_code, res.text)
+            else:
+                print("❌ Assigned agent has no chat_id:", assigned)
+
     except Exception as e:
         print("❌ Telegram send error:", e)
-
 
 
 # ---------------- AUTO ASSIGN LEAST BUSY ----------------
 def get_least_busy_agent():
     if not agent_workload:
         return None
-    return min(agent_workload, key=agent_workload.get)
 
+    return min(agent_workload, key=agent_workload.get)
 
 # ---------------- TELEGRAM SEND WITH BUTTONS ----------------
 def send_telegram_with_buttons(text, ticket_id):
@@ -173,11 +192,20 @@ def send_telegram_with_buttons(text, ticket_id):
         chat_ids = os.getenv("TELEGRAM_CHAT_IDS", "").split(",")
 
         buttons = {
-            "inline_keyboard": [[
-                {"text": "🟢 Claim Ticket", "callback_data": f"claim_{ticket_id}"},
-                {"text": "🔁 Transfer", "callback_data": f"transfer_{ticket_id}"},
-                {"text": "🔒 Close", "callback_data": f"close_{ticket_id}"}
-            ]]
+            "inline_keyboard": [
+                [
+                    {"text": "🟢 Claim", "callback_data": f"claim_{ticket_id}"},
+                    {"text": "🔁 Transfer", "callback_data": f"transfer_{ticket_id}"}
+                ],
+                [
+                    {"text": "🔒 Close", "callback_data": f"close_{ticket_id}"},
+                    {"text": "🔥 Priority", "callback_data": f"priority_{ticket_id}"}
+                ],
+                [
+                    {"text": "📝 Note", "callback_data": f"note_{ticket_id}"},
+                    {"text": "🤖 AI Reply", "callback_data": f"ai_{ticket_id}"}
+                ]
+            ]
         }
 
         for chat_id in chat_ids:
@@ -267,7 +295,9 @@ def send_telegram_file(file_path, ticket_id, name=None, email=None):
             url = f"https://api.telegram.org/bot{token}/sendDocument"
             key = "document"
 
-        # 🔥 BEFORE ASSIGNMENT → send to all
+        caption = f"📎 Ticket #{ticket_id}"
+
+        # 🔥 BEFORE ASSIGNMENT → ALL AGENTS
         if not assigned:
             chat_ids = os.getenv("TELEGRAM_CHAT_IDS", "").split(",")
 
@@ -277,28 +307,36 @@ def send_telegram_file(file_path, ticket_id, name=None, email=None):
                     continue
 
                 with open(file_path, "rb") as f:
-                    requests.post(
+                    res = requests.post(
                         url,
-                        data={"chat_id": chat_id},
+                        data={"chat_id": chat_id, "caption": caption},
                         files={key: f},
                         timeout=15
                     )
 
-        # 🔥 AFTER ASSIGNMENT → only assigned agent
+                    print("📤 FILE ALL:", chat_id, res.status_code)
+
+        # 🔥 AFTER ASSIGNMENT → ONLY ASSIGNED
         else:
             chat_id = AGENT_CHAT_MAP.get(assigned)
 
             if chat_id:
                 with open(file_path, "rb") as f:
-                    requests.post(
+                    res = requests.post(
                         url,
-                        data={"chat_id": chat_id},
+                        data={"chat_id": chat_id, "caption": caption},
                         files={key: f},
                         timeout=15
                     )
 
+                    print("📤 FILE ASSIGNED:", assigned, res.status_code)
+            else:
+                print("❌ No chat_id for assigned agent:", assigned)
+
     except Exception as e:
         print("❌ TELEGRAM FILE ERROR:", e)
+
+
 
 
 # ---------------- TELEGRAM RECEIVE ----------------
@@ -315,11 +353,11 @@ def telegram_webhook():
             action = query["data"]
 
             user = query["from"]
-
             agent = (user.get("username") or user.get("first_name")).lower()
             chat_id = str(user["id"])
 
             AGENT_CHAT_MAP[agent] = chat_id
+            ONLINE_AGENTS.add(agent)   # 🔥 presence tracking
 
             conn = get_db()
             c = conn.cursor()
@@ -334,6 +372,7 @@ def telegram_webhook():
                 if row and row["assigned_to"]:
                     send_telegram(f"❌ Already assigned to {row['assigned_to']}")
                 else:
+                    # 🔥 AUTO ASSIGN LOGIC (Zendesk style)
                     c.execute("UPDATE tickets SET assigned_to=? WHERE id=?", (agent, ticket_id))
                     conn.commit()
 
@@ -364,8 +403,11 @@ def telegram_webhook():
                     if a == agent:
                         continue
 
+                    status = "🟢" if a in ONLINE_AGENTS else "⚫"
+                    load = agent_workload.get(a, 0)
+
                     buttons["inline_keyboard"].append([
-                        {"text": f"👤 {a}", "callback_data": f"transfer_to|{ticket_id}|{a}"}
+                        {"text": f"{status} {a} ({load})", "callback_data": f"transfer_to|{ticket_id}|{a}"}
                     ])
 
                 requests.post(
@@ -385,39 +427,41 @@ def telegram_webhook():
 
                 c.execute("SELECT assigned_to FROM tickets WHERE id=?", (ticket_id,))
                 row = c.fetchone()
-                old_agent = row["assigned_to"] if row else None
+                old_agent = row["assigned_to"]
 
                 if new_agent == old_agent:
-                    send_telegram("❌ Already assigned to this agent")
+                    send_telegram("❌ Already assigned")
                     return "ok"
 
                 c.execute("UPDATE tickets SET assigned_to=? WHERE id=?", (new_agent, ticket_id))
                 conn.commit()
 
-                if old_agent:
-                    agent_workload[old_agent] = max(0, agent_workload.get(old_agent, 1) - 1)
-
+                agent_workload[old_agent] = max(0, agent_workload.get(old_agent, 1) - 1)
                 agent_workload[new_agent] = agent_workload.get(new_agent, 0) + 1
 
-                # 🔥 notify new agent
-                new_chat_id = AGENT_CHAT_MAP.get(new_agent)
-                if new_chat_id:
-                    requests.post(
-                        f"https://api.telegram.org/bot{os.getenv('TELEGRAM_BOT_TOKEN')}/sendMessage",
-                        json={
-                            "chat_id": new_chat_id,
-                            "text": f"📩 You are now assigned to ticket #{ticket_id}"
-                        }
-                    )
+                # 🔥 notify both
+                send_telegram(f"📩 Assigned to #{ticket_id}", ticket_id)
+                send_telegram(f"ℹ️ Ticket transferred to {new_agent}", ticket_id)
 
                 socketio.emit("agent_transfer", {
                     "ticket_id": ticket_id,
                     "to": new_agent
                 }, room=ticket_id)
 
-                send_telegram(f"🔁 Ticket #{ticket_id} → {new_agent}", ticket_id)
-
                 conn.close()
+                return "ok"
+
+            # ---------------- PRIORITY ----------------
+            if action.startswith("priority_"):
+                ticket_id = action.split("_")[1]
+                TICKET_PRIORITY[ticket_id] = "High"
+                send_telegram(f"🔥 Priority set to HIGH for #{ticket_id}")
+                return "ok"
+
+            # ---------------- AI REPLY ----------------
+            if action.startswith("ai_"):
+                ticket_id = action.split("_")[1]
+                send_telegram(f"🤖 Suggested reply:\nHello, we are reviewing your issue.", ticket_id)
                 return "ok"
 
             # ---------------- CLOSE ----------------
@@ -435,7 +479,7 @@ def telegram_webhook():
                 return "ok"
 
         # ---------------- NORMAL MESSAGE ----------------
-        msg_obj = data.get("message") or data.get("edited_message")
+        msg_obj = data.get("message")
         if not msg_obj:
             return "ok"
 
@@ -446,73 +490,17 @@ def telegram_webhook():
         chat_id = str(msg_obj.get("chat", {}).get("id"))
 
         AGENT_CHAT_MAP[agent] = chat_id
+        ONLINE_AGENTS.add(agent)
 
         conn = get_db()
         c = conn.cursor()
 
-        # ---------------- IMAGE ----------------
-        if "photo" in msg_obj:
-            file_id = msg_obj["photo"][-1]["file_id"]
-            filename = download_telegram_file(file_id)
-
-            caption = msg_obj.get("caption", "")
-            ticket_id = re.search(r"\d+", caption).group(0)
-
-            c.execute("SELECT assigned_to FROM tickets WHERE id=?", (ticket_id,))
-            row = c.fetchone()
-
-            if row["assigned_to"] != agent:
-                send_telegram(f"❌ Assigned to {row['assigned_to']}")
-                return "ok"
-
-            c.execute("INSERT INTO messages VALUES (NULL,?,?,?,?)",
-                      (ticket_id, "admin", f"[FILE] {filename}", now))
-            conn.commit()
-            conn.close()
-
-            socketio.emit("new_message", {
-                "ticket_id": ticket_id,
-                "message": f"[FILE] {filename}",
-                "sender": "admin",
-                "time": now,
-                "agent": agent
-            }, room=ticket_id)
-
-            return "ok"
-
-        # ---------------- VIDEO ----------------
-        if "video" in msg_obj:
-            file_id = msg_obj["video"]["file_id"]
-            filename = download_telegram_file(file_id)
-
-            caption = msg_obj.get("caption", "")
-            ticket_id = re.search(r"\d+", caption).group(0)
-
-            c.execute("SELECT assigned_to FROM tickets WHERE id=?", (ticket_id,))
-            row = c.fetchone()
-
-            if row["assigned_to"] != agent:
-                send_telegram(f"❌ Assigned to {row['assigned_to']}")
-                return "ok"
-
-            c.execute("INSERT INTO messages VALUES (NULL,?,?,?,?)",
-                      (ticket_id, "admin", f"[FILE] {filename}", now))
-            conn.commit()
-            conn.close()
-
-            socketio.emit("new_message", {
-                "ticket_id": ticket_id,
-                "message": f"[FILE] {filename}",
-                "sender": "admin",
-                "time": now,
-                "agent": agent
-            }, room=ticket_id)
-
-            return "ok"
+        # ---------------- TAG AUTO DETECTION ----------------
+        text = msg_obj.get("text", "").lower()
+        if "refund" in text:
+            TICKET_TAGS.setdefault(ticket_id, []).append("refund")
 
         # ---------------- TEXT ----------------
-        text = msg_obj.get("text", "").strip()
-
         match = re.match(r"#?\s*(\d+)\s*:\s*(.+)", text)
         if not match:
             send_telegram("❌ Use: #123456: message")
@@ -546,7 +534,6 @@ def telegram_webhook():
         print("❌ TELEGRAM ERROR:", e)
 
     return "ok"
-
 
 
 # ---------------- CREATE ADMIN ----------------
@@ -865,13 +852,12 @@ def admin_stats():
 
 
 
-
-
-
 # ---------------- SOCKET ----------------
 @socketio.on('send_message')
 def handle_message(data):
     try:
+        debug_log("SOCKET INPUT", data)
+
         now = datetime.datetime.now().strftime('%H:%M')
 
         ticket_id = str(data.get('ticket_id', '')).strip()
@@ -879,20 +865,35 @@ def handle_message(data):
         message = (data.get('message') or "").strip()
 
         if not ticket_id or not message:
+            debug_log("INVALID MESSAGE", {"ticket_id": ticket_id, "message": message})
             return
 
         conn = get_db()
         c = conn.cursor()
 
+        # 🔥 CHECK TICKET EXISTS
         c.execute("SELECT assigned_to FROM tickets WHERE id=?", (ticket_id,))
         row = c.fetchone()
-        assigned_to = row["assigned_to"] if row else None
 
-        # 🔥 FIX: SAFE LOWERCASE AGENT NAME
-        agent_name = (session.get("admin") or "agent").lower()
+        if not row:
+            debug_log("TICKET NOT FOUND", ticket_id)
+            return
+
+        assigned_to = row["assigned_to"]
+
+        # 🔥 SAFE AGENT NAME
+        agent_name = (session.get("admin") or "").lower()
+
+        # 🔥 TRACK ONLINE AGENT
+        if agent_name:
+            ONLINE_AGENTS.add(agent_name)
 
         # ---------------- ADMIN MESSAGE ----------------
         if sender == "admin":
+
+            if not agent_name:
+                debug_log("NO ADMIN SESSION")
+                return
 
             # 🔥 AUTO ASSIGN FIRST RESPONDER
             if not assigned_to:
@@ -906,12 +907,14 @@ def handle_message(data):
                 # 🔥 TRACK WORKLOAD
                 agent_workload[agent_name] = agent_workload.get(agent_name, 0) + 1
 
+                debug_log("AUTO ASSIGNED", agent_name)
+
                 socketio.emit("assigned", {
                     "ticket_id": ticket_id,
                     "agent": agent_name
                 }, room=ticket_id)
 
-                # 🔥 NEW: notify Telegram agent
+                # 🔥 NOTIFY TELEGRAM AGENT
                 chat_id = AGENT_CHAT_MAP.get(agent_name)
                 if chat_id:
                     requests.post(
@@ -924,6 +927,11 @@ def handle_message(data):
 
             # 🔥 LOCK SYSTEM
             elif assigned_to != agent_name:
+                debug_log("BLOCKED MESSAGE", {
+                    "assigned_to": assigned_to,
+                    "attempted": agent_name
+                })
+
                 socketio.emit("blocked", {
                     "message": f"This ticket is assigned to {assigned_to}"
                 })
@@ -938,8 +946,16 @@ def handle_message(data):
         conn.commit()
         conn.close()
 
+        debug_log("MESSAGE SAVED", {
+            "ticket_id": ticket_id,
+            "sender": sender,
+            "message": message
+        })
+
         # ---------------- TELEGRAM SEND ----------------
-        send_telegram(f"""
+        try:
+            if sender == "admin":
+                send_telegram(f"""
 💬 Message
 
 Ticket: #{ticket_id}
@@ -947,6 +963,19 @@ From: {agent_name}
 
 {message}
 """, ticket_id)
+            else:
+                # 🔥 USER MESSAGE → notify assigned agent
+                send_telegram(f"""
+📩 New Customer Message
+
+Ticket: #{ticket_id}
+
+{message}
+""", ticket_id)
+
+        except Exception as tg_error:
+            logging.error("❌ TELEGRAM SEND FAILED")
+            logging.exception(tg_error)
 
         # ---------------- REALTIME ----------------
         socketio.emit('new_message', {
@@ -954,86 +983,28 @@ From: {agent_name}
             "message": message,
             "sender": sender,
             "time": now,
-            "agent": agent_name
+            "agent": agent_name or "user"
         }, room=ticket_id)
 
     except Exception as e:
-        print("❌ SOCKET ERROR:", e)
+        logging.error("❌ SOCKET ERROR")
+        logging.exception(e)
 
 
-
-
+# ---------------- AGENT JOIN ----------------
 @socketio.on('agent_join')
 def agent_join(data):
-    ticket_id = str(data.get('ticket_id')).strip()
+    try:
+        ticket_id = str(data.get('ticket_id', '')).strip()
+        if not ticket_id:
+            return
 
-    agent_name = (session.get("admin") or "agent").lower()
+        agent_name = (session.get("admin") or "").lower()
+        if not agent_name:
+            return
 
-    now = datetime.datetime.now().strftime('%d %b %Y, %I:%M %p')
+        ONLINE_AGENTS.add(agent_name)
 
-    socketio.emit('agent_join', {
-        "agent": agent_name,
-        "time": now
-    }, room=ticket_id)
-
-
-
-
-@socketio.on('agent_leave')
-def agent_leave(data):
-    ticket_id = str(data.get('ticket_id')).strip()
-
-    agent_name = (session.get("admin") or "agent").lower()
-
-    now = datetime.datetime.now().strftime('%d %b %Y, %I:%M %p')
-
-    socketio.emit('agent_leave', {
-        "agent": agent_name,
-        "time": now
-    }, room=ticket_id)
-
-
-
-@socketio.on("agent_transfer")
-def agent_transfer(data):
-    ticket_id = data.get("ticket_id")
-    new_agent = data.get("to")
-
-    # 🔥 update workload safely
-    for agent in agent_workload:
-        if agent == new_agent:
-            agent_workload[agent] += 1
-        else:
-            agent_workload[agent] = max(0, agent_workload.get(agent, 1) - 1)
-
-    socketio.emit("agent_transfer", data, room=ticket_id)
-
-
-
-
-@socketio.on('disconnect')
-def handle_disconnect():
-    if "admin" in session:
-        agent_name = session.get("admin", "Agent")
-        now = datetime.datetime.now().strftime('%d %b %Y, %I:%M %p')
-
-        socketio.emit('agent_leave', {
-            "agent": agent_name,
-            "time": now
-        })
-
-
-# ---------------- JOIN ROOM ----------------
-@socketio.on('join_ticket')
-def join_ticket(data):
-    ticket_id = str(data['ticket_id']).strip()
-    join_room(ticket_id)
-
-    print(f"Joined room {ticket_id}")
-
-    # 🔥 ONLY ADMIN SHOULD TRIGGER JOIN MESSAGE
-    if "admin" in session:
-        agent_name = session.get("admin", "Agent")
         now = datetime.datetime.now().strftime('%d %b %Y, %I:%M %p')
 
         socketio.emit('agent_join', {
@@ -1041,26 +1012,157 @@ def join_ticket(data):
             "time": now
         }, room=ticket_id)
 
+    except Exception as e:
+        logging.exception("❌ agent_join error")
+
+
+# ---------------- AGENT LEAVE ----------------
+@socketio.on('agent_leave')
+def agent_leave(data):
+    try:
+        ticket_id = str(data.get('ticket_id', '')).strip()
+        if not ticket_id:
+            return
+
+        agent_name = (session.get("admin") or "").lower()
+        if not agent_name:
+            return
+
+        ONLINE_AGENTS.discard(agent_name)
+
+        now = datetime.datetime.now().strftime('%d %b %Y, %I:%M %p')
+
+        socketio.emit('agent_leave', {
+            "agent": agent_name,
+            "time": now
+        }, room=ticket_id)
+
+    except Exception as e:
+        logging.exception("❌ agent_leave error")
+
+
+# ---------------- AGENT TRANSFER ----------------
+@socketio.on("agent_transfer")
+def agent_transfer(data):
+    try:
+        ticket_id = data.get("ticket_id")
+        new_agent = (data.get("to") or "").lower()
+
+        if not ticket_id or not new_agent:
+            return
+
+        # 🔥 GET CURRENT ASSIGNED AGENT FROM DB
+        conn = get_db()
+        c = conn.cursor()
+
+        c.execute("SELECT assigned_to FROM tickets WHERE id=?", (ticket_id,))
+        row = c.fetchone()
+        old_agent = row["assigned_to"] if row else None
+
+        # 🔥 UPDATE DB
+        c.execute("UPDATE tickets SET assigned_to=? WHERE id=?", (new_agent, ticket_id))
+        conn.commit()
+        conn.close()
+
+        # 🔥 FIXED WORKLOAD LOGIC
+        if old_agent:
+            agent_workload[old_agent] = max(0, agent_workload.get(old_agent, 1) - 1)
+
+        agent_workload[new_agent] = agent_workload.get(new_agent, 0) + 1
+
+        # 🔥 REALTIME UI UPDATE
+        socketio.emit("agent_transfer", {
+            "ticket_id": ticket_id,
+            "to": new_agent
+        }, room=ticket_id)
+
+    except Exception as e:
+        logging.exception("❌ agent_transfer error")
+
+
+# ---------------- DISCONNECT ----------------
+@socketio.on('disconnect')
+def handle_disconnect():
+    try:
+        if "admin" in session:
+            agent_name = (session.get("admin") or "").lower()
+
+            if agent_name:
+                ONLINE_AGENTS.discard(agent_name)
+
+                now = datetime.datetime.now().strftime('%d %b %Y, %I:%M %p')
+
+                socketio.emit('agent_leave', {
+                    "agent": agent_name,
+                    "time": now
+                })
+
+    except Exception as e:
+        logging.exception("❌ disconnect error")
+
+# ---------------- JOIN ROOM ----------------
+@socketio.on('join_ticket')
+def join_ticket(data):
+    try:
+        ticket_id = str(data.get('ticket_id', '')).strip()
+        if not ticket_id:
+            return
+
+        join_room(ticket_id)
+
+        print(f"Joined room {ticket_id}")
+
+        if "admin" in session:
+            agent_name = (session.get("admin") or "").lower()
+
+            if agent_name:
+                ONLINE_AGENTS.add(agent_name)
+
+                now = datetime.datetime.now().strftime('%d %b %Y, %I:%M %p')
+
+                socketio.emit('agent_join', {
+                    "agent": agent_name,
+                    "time": now
+                }, room=ticket_id)
+
+    except Exception as e:
+        logging.exception("❌ join_ticket error")
+
 # ---------------- TYPING ----------------
 @socketio.on('typing')
 def typing(data):
-    ticket_id = str(data.get('ticket_id')).strip()
-    agent_name = session.get("admin", "Agent")
+    try:
+        ticket_id = str(data.get('ticket_id', '')).strip()
+        if not ticket_id:
+            return
 
-    socketio.emit('typing', {
-        "agent": agent_name
-    }, room=ticket_id, include_self=False)
+        agent_name = (session.get("admin") or "").lower()
+
+        if not agent_name:
+            return
+
+        socketio.emit('typing', {
+            "agent": agent_name
+        }, room=ticket_id, include_self=False)
+
+    except Exception as e:
+        logging.exception("❌ typing error")
+
 
 # ---------------- SEEN ----------------
 @socketio.on('seen')
 def seen(data):
-    ticket_id = str(data.get('ticket_id')).strip()
+    try:
+        ticket_id = str(data.get('ticket_id', '')).strip()
+        if not ticket_id:
+            return
 
-    socketio.emit('seen', {
-        "ticket_id": ticket_id
-    }, room=ticket_id)
+        socketio.emit('seen', {
+            "ticket_id": ticket_id
+        }, room=ticket_id)
 
-
+    except Exception as e:
+        logging.exception("❌ seen error")
 
 
 @socketio.on_error_default
