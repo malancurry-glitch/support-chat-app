@@ -76,6 +76,7 @@ def init_db():
     conn = get_db()
     c = conn.cursor()
 
+    # ---------------- CREATE TABLES ----------------
     c.execute('''
     CREATE TABLE IF NOT EXISTS tickets (
         id TEXT PRIMARY KEY,
@@ -104,6 +105,17 @@ def init_db():
         password TEXT,
         role TEXT
     )''')
+
+    # ---------------- SAFE UPGRADES ----------------
+    try:
+        c.execute("ALTER TABLE tickets ADD COLUMN tags TEXT")
+    except:
+        pass
+
+    try:
+        c.execute("ALTER TABLE tickets ADD COLUMN updated_at TEXT")
+    except:
+        pass
 
     conn.commit()
     conn.close()
