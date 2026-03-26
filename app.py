@@ -138,7 +138,7 @@ def send_telegram(text, ticket_id=None):
         if ticket_id:
             c.execute("SELECT assigned_to FROM tickets WHERE id=?", (ticket_id,))
             row = c.fetchone()
-            assigned = row["assigned_to"] if row else None
+            assigned = (row["assigned_to"] or "").lower() if row else None
 
         conn.close()
 
@@ -151,32 +151,35 @@ def send_telegram(text, ticket_id=None):
                 if not chat_id:
                     continue
 
-                res = requests.post(
-                    f"https://api.telegram.org/bot{token}/sendMessage",
-                    json={"chat_id": chat_id, "text": text},
-                    timeout=10
-                )
-
-                print("📤 TELEGRAM ALL:", chat_id, res.status_code, res.text)
+                try:
+                    res = requests.post(
+                        f"https://api.telegram.org/bot{token}/sendMessage",
+                        json={"chat_id": chat_id, "text": text},
+                        timeout=10
+                    )
+                    print("📤 TELEGRAM ALL:", chat_id, res.status_code)
+                except Exception as e:
+                    print("❌ SEND FAIL:", chat_id, e)
 
         # 🔥 AFTER ASSIGNMENT → SEND ONLY TO ASSIGNED AGENT
         else:
             chat_id = AGENT_CHAT_MAP.get(assigned)
 
             if chat_id:
-                res = requests.post(
-                    f"https://api.telegram.org/bot{token}/sendMessage",
-                    json={"chat_id": chat_id, "text": text},
-                    timeout=10
-                )
-
-                print("📤 TELEGRAM ASSIGNED:", assigned, res.status_code, res.text)
+                try:
+                    res = requests.post(
+                        f"https://api.telegram.org/bot{token}/sendMessage",
+                        json={"chat_id": chat_id, "text": text},
+                        timeout=10
+                    )
+                    print("📤 TELEGRAM ASSIGNED:", assigned, res.status_code)
+                except Exception as e:
+                    print("❌ SEND FAIL:", assigned, e)
             else:
-                print("❌ Assigned agent has no chat_id:", assigned)
+                print("❌ No chat_id for assigned agent:", assigned)
 
     except Exception as e:
         print("❌ Telegram send error:", e)
-
 
 # ---------------- AUTO ASSIGN LEAST BUSY ----------------
 def get_least_busy_agent():
@@ -184,6 +187,7 @@ def get_least_busy_agent():
         return None
 
     return min(agent_workload, key=agent_workload.get)
+
 
 # ---------------- TELEGRAM SEND WITH BUTTONS ----------------
 def send_telegram_with_buttons(text, ticket_id):
@@ -213,17 +217,20 @@ def send_telegram_with_buttons(text, ticket_id):
             if not chat_id:
                 continue
 
-            res = requests.post(
-                f"https://api.telegram.org/bot{token}/sendMessage",
-                json={
-                    "chat_id": chat_id,
-                    "text": text,
-                    "reply_markup": buttons
-                },
-                timeout=10
-            )
+            try:
+                res = requests.post(
+                    f"https://api.telegram.org/bot{token}/sendMessage",
+                    json={
+                        "chat_id": chat_id,
+                        "text": text,
+                        "reply_markup": buttons
+                    },
+                    timeout=10
+                )
 
-            print("📤 BUTTON:", chat_id, res.status_code, res.text)
+                print("📤 BUTTON:", chat_id, res.status_code)
+            except Exception as e:
+                print("❌ BUTTON FAIL:", chat_id, e)
 
     except Exception as e:
         print("❌ BUTTON ERROR:", e)
@@ -266,8 +273,6 @@ def download_telegram_file(file_id):
 
 
 
-
-
 def send_telegram_file(file_path, ticket_id, name=None, email=None):
     try:
         token = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -279,7 +284,7 @@ def send_telegram_file(file_path, ticket_id, name=None, email=None):
         if ticket_id:
             c.execute("SELECT assigned_to FROM tickets WHERE id=?", (ticket_id,))
             row = c.fetchone()
-            assigned = row["assigned_to"] if row else None
+            assigned = (row["assigned_to"] or "").lower() if row else None
 
         conn.close()
 
@@ -297,7 +302,7 @@ def send_telegram_file(file_path, ticket_id, name=None, email=None):
 
         caption = f"📎 Ticket #{ticket_id}"
 
-        # 🔥 BEFORE ASSIGNMENT → ALL AGENTS
+        # 🔥 BEFORE ASSIGNMENT → ALL
         if not assigned:
             chat_ids = os.getenv("TELEGRAM_CHAT_IDS", "").split(",")
 
@@ -306,38 +311,39 @@ def send_telegram_file(file_path, ticket_id, name=None, email=None):
                 if not chat_id:
                     continue
 
-                with open(file_path, "rb") as f:
-                    res = requests.post(
-                        url,
-                        data={"chat_id": chat_id, "caption": caption},
-                        files={key: f},
-                        timeout=15
-                    )
+                try:
+                    with open(file_path, "rb") as f:
+                        requests.post(
+                            url,
+                            data={"chat_id": chat_id, "caption": caption},
+                            files={key: f},
+                            timeout=15
+                        )
+                    print("📤 FILE ALL:", chat_id)
+                except Exception as e:
+                    print("❌ FILE SEND FAIL:", chat_id, e)
 
-                    print("📤 FILE ALL:", chat_id, res.status_code)
-
-        # 🔥 AFTER ASSIGNMENT → ONLY ASSIGNED
+        # 🔥 AFTER ASSIGNMENT → ONLY ONE
         else:
             chat_id = AGENT_CHAT_MAP.get(assigned)
 
             if chat_id:
-                with open(file_path, "rb") as f:
-                    res = requests.post(
-                        url,
-                        data={"chat_id": chat_id, "caption": caption},
-                        files={key: f},
-                        timeout=15
-                    )
-
-                    print("📤 FILE ASSIGNED:", assigned, res.status_code)
+                try:
+                    with open(file_path, "rb") as f:
+                        requests.post(
+                            url,
+                            data={"chat_id": chat_id, "caption": caption},
+                            files={key: f},
+                            timeout=15
+                        )
+                    print("📤 FILE ASSIGNED:", assigned)
+                except Exception as e:
+                    print("❌ FILE SEND FAIL:", assigned, e)
             else:
                 print("❌ No chat_id for assigned agent:", assigned)
 
     except Exception as e:
         print("❌ TELEGRAM FILE ERROR:", e)
-
-
-
 
 # ---------------- TELEGRAM RECEIVE ----------------
 @app.route('/telegram', methods=['POST'])
@@ -353,11 +359,11 @@ def telegram_webhook():
             action = query["data"]
 
             user = query["from"]
-            agent = (user.get("username") or user.get("first_name")).lower()
+            agent = (user.get("username") or user.get("first_name") or "").lower().strip()
             chat_id = str(user["id"])
 
             AGENT_CHAT_MAP[agent] = chat_id
-            ONLINE_AGENTS.add(agent)   # 🔥 presence tracking
+            ONLINE_AGENTS.add(agent)
 
             conn = get_db()
             c = conn.cursor()
@@ -372,7 +378,6 @@ def telegram_webhook():
                 if row and row["assigned_to"]:
                     send_telegram(f"❌ Already assigned to {row['assigned_to']}")
                 else:
-                    # 🔥 AUTO ASSIGN LOGIC (Zendesk style)
                     c.execute("UPDATE tickets SET assigned_to=? WHERE id=?", (agent, ticket_id))
                     conn.commit()
 
@@ -419,6 +424,7 @@ def telegram_webhook():
                     }
                 )
 
+                conn.close()
                 return "ok"
 
             # ---------------- TRANSFER SELECT ----------------
@@ -427,19 +433,21 @@ def telegram_webhook():
 
                 c.execute("SELECT assigned_to FROM tickets WHERE id=?", (ticket_id,))
                 row = c.fetchone()
-                old_agent = row["assigned_to"]
+                old_agent = row["assigned_to"] if row else None
 
                 if new_agent == old_agent:
                     send_telegram("❌ Already assigned")
+                    conn.close()
                     return "ok"
 
                 c.execute("UPDATE tickets SET assigned_to=? WHERE id=?", (new_agent, ticket_id))
                 conn.commit()
 
-                agent_workload[old_agent] = max(0, agent_workload.get(old_agent, 1) - 1)
+                if old_agent:
+                    agent_workload[old_agent] = max(0, agent_workload.get(old_agent, 1) - 1)
+
                 agent_workload[new_agent] = agent_workload.get(new_agent, 0) + 1
 
-                # 🔥 notify both
                 send_telegram(f"📩 Assigned to #{ticket_id}", ticket_id)
                 send_telegram(f"ℹ️ Ticket transferred to {new_agent}", ticket_id)
 
@@ -456,12 +464,14 @@ def telegram_webhook():
                 ticket_id = action.split("_")[1]
                 TICKET_PRIORITY[ticket_id] = "High"
                 send_telegram(f"🔥 Priority set to HIGH for #{ticket_id}")
+                conn.close()
                 return "ok"
 
             # ---------------- AI REPLY ----------------
             if action.startswith("ai_"):
                 ticket_id = action.split("_")[1]
                 send_telegram(f"🤖 Suggested reply:\nHello, we are reviewing your issue.", ticket_id)
+                conn.close()
                 return "ok"
 
             # ---------------- CLOSE ----------------
@@ -486,7 +496,7 @@ def telegram_webhook():
         now = datetime.datetime.now().strftime('%H:%M')
 
         user = msg_obj.get("from", {})
-        agent = (user.get("username") or user.get("first_name")).lower()
+        agent = (user.get("username") or user.get("first_name") or "").lower().strip()
         chat_id = str(msg_obj.get("chat", {}).get("id"))
 
         AGENT_CHAT_MAP[agent] = chat_id
@@ -495,25 +505,28 @@ def telegram_webhook():
         conn = get_db()
         c = conn.cursor()
 
-        # ---------------- TAG AUTO DETECTION ----------------
-        text = msg_obj.get("text", "").lower()
-        if "refund" in text:
-            TICKET_TAGS.setdefault(ticket_id, []).append("refund")
+        text = msg_obj.get("text", "").strip()
 
         # ---------------- TEXT ----------------
         match = re.match(r"#?\s*(\d+)\s*:\s*(.+)", text)
         if not match:
             send_telegram("❌ Use: #123456: message")
+            conn.close()
             return "ok"
 
         ticket_id = match.group(1)
         msg = match.group(2)
 
+        # 🔥 TAG AFTER ticket_id exists
+        if "refund" in msg.lower():
+            TICKET_TAGS.setdefault(ticket_id, []).append("refund")
+
         c.execute("SELECT assigned_to FROM tickets WHERE id=?", (ticket_id,))
         row = c.fetchone()
 
-        if row["assigned_to"] != agent:
-            send_telegram(f"❌ Assigned to {row['assigned_to']}")
+        if not row or row["assigned_to"] != agent:
+            send_telegram(f"❌ Assigned to {row['assigned_to'] if row else 'none'}")
+            conn.close()
             return "ok"
 
         c.execute("INSERT INTO messages VALUES (NULL,?,?,?,?)",

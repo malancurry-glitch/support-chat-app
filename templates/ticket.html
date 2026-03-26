@@ -51,15 +51,9 @@ body { margin:0; font-family:-apple-system,BlinkMacSystemFont,sans-serif; backgr
     color:#6b7280;
 }
 
-.bubble img, .bubble video {
-    max-width:260px;
-    border-radius:10px;
-    margin-top:6px;
-}
-
 .time { font-size:10px; opacity:0.6; margin-top:4px; }
 
-.input-box { display:flex; padding:12px; border-top:1px solid #eee; background:white; }
+.input-box { display:flex; padding:12px; border-top:1px solid #eee; }
 
 input { flex:1; padding:12px; border-radius:20px; border:1px solid #ddd; }
 
@@ -110,6 +104,7 @@ var ticket_id = "{{ticket_id}}";
 const box = document.getElementById("messages");
 const typingEl = document.getElementById("typing");
 const agentStatus = document.getElementById("agentStatus");
+const slaTimer = document.getElementById("slaTimer");
 
 let assignedAgent = null;
 
@@ -120,7 +115,7 @@ socket.emit("join_ticket", { ticket_id });
 let start = Date.now();
 setInterval(()=>{
     let diff = 300000 - (Date.now()-start);
-    if(diff<0) diff=0;
+    if(diff < 0) diff = 0;
     slaTimer.innerText = "Response SLA: " + Math.floor(diff/1000) + "s";
 },1000);
 
@@ -140,31 +135,12 @@ function addMessage(msg,sender,time="",agent="Agent"){
 
     let avatar=document.createElement("div");
     avatar.className="avatar " + (sender==="user"?"user-avatar":"admin-avatar");
-
-    // 🔥 FIX: SAFE AVATAR
     avatar.innerText = sender==="user" ? "U" : (agent ? agent[0].toUpperCase() : "A");
 
     let bubble=document.createElement("div");
     bubble.className="bubble "+sender;
 
-    if(msg.startsWith("[FILE]")){
-        let file=msg.replace("[FILE] ","");
-        let url="/uploads/"+file;
-        let ext=file.split('.').pop().toLowerCase();
-
-        if(["jpg","jpeg","png","gif","webp"].includes(ext)){
-            bubble.innerHTML=`<img src="${url}">`;
-        }
-        else if(["mp4","webm","ogg"].includes(ext)){
-            bubble.innerHTML=`<video controls><source src="${url}"></video>`;
-        }
-        else{
-            bubble.innerHTML=`<a href="${url}" target="_blank">📎 ${file}</a>`;
-        }
-    } else {
-        bubble.innerText=msg;
-    }
-
+    bubble.innerText = msg;
     bubble.innerHTML += `<div class="time">${time}</div>`;
 
     if(sender==="user"){
@@ -180,7 +156,7 @@ function addMessage(msg,sender,time="",agent="Agent"){
 }
 
 // SCROLL
-function scroll(){ box.scrollTop=box.scrollHeight; }
+function scroll(){ box.scrollTop = box.scrollHeight; }
 
 // LOAD HISTORY
 fetch(`/api/history/${ticket_id}`)
@@ -193,7 +169,7 @@ fetch(`/api/history/${ticket_id}`)
 
 // SEND
 function sendMessage(){
-    let msg=messageInput.value.trim();
+    let msg = messageInput.value.trim();
     if(!msg) return;
 
     socket.emit("send_message",{ticket_id,sender:"user",message:msg});
@@ -220,18 +196,16 @@ socket.on("new_message",data=>{
     }
 });
 
-// 🔥 ASSIGNED
+// ASSIGNED
 socket.on("assigned", data=>{
     if(data.ticket_id == ticket_id){
         assignedAgent = data.agent;
-
-        system(`<b>${assignedAgent}</b> is assigned to your ticket`);
-
+        system(`<b>${assignedAgent}</b> is now handling your ticket`);
         agentStatus.innerText = "● Assigned to " + assignedAgent;
     }
 });
 
-// 🔥 TRANSFERRING
+// TRANSFERRING
 socket.on("agent_transferring", data=>{
     if(data.ticket_id == ticket_id){
         system(`🔁 <b>${data.from}</b> is transferring your chat...`);
@@ -239,18 +213,16 @@ socket.on("agent_transferring", data=>{
     }
 });
 
-// 🔥 TRANSFER COMPLETE
+// TRANSFER COMPLETE
 socket.on("agent_transfer",data=>{
     if(data.ticket_id == ticket_id){
         assignedAgent = data.to;
-
         system(`🔁 Chat transferred to <b>${data.to}</b>`);
-
         agentStatus.innerText = "● Assigned to " + data.to;
     }
 });
 
-// 🔥 TYPING
+// TYPING
 socket.on("typing",data=>{
     if(data.agent === assignedAgent){
         typingEl.innerText = data.agent + " is typing...";
@@ -263,9 +235,9 @@ function goBack(){
     window.location.href="/my-tickets";
 }
 
-// INITIAL MESSAGE
+// INIT
 window.onload=()=>{
-    system("One of our Customer Support agents will be with you soon. Stay tuned!");
+    system("One of our Customer Support agents will be with you soon.");
 };
 </script>
 
