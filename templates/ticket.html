@@ -45,10 +45,12 @@ body { margin:0; font-family:-apple-system,BlinkMacSystemFont,sans-serif; backgr
 .user { background:#2563eb; color:white; margin-left:auto; }
 .admin { background:#e5e7eb; }
 
-.system {
-    text-align:center;
-    font-size:12px;
-    color:#6b7280;
+.system { text-align:center; font-size:12px; color:#6b7280; }
+
+.bubble img, .bubble video {
+    max-width:250px;
+    border-radius:8px;
+    margin-top:6px;
 }
 
 .time { font-size:10px; opacity:0.6; margin-top:4px; }
@@ -61,12 +63,7 @@ button { margin-left:6px; padding:10px; border:none; border-radius:50%; backgrou
 
 .typing { font-size:12px; color:#6b7280; padding-left:10px; }
 
-.sla {
-    font-size:11px;
-    background:#fef3c7;
-    padding:3px 6px;
-    border-radius:6px;
-}
+.sla { font-size:11px; background:#fef3c7; padding:3px 6px; border-radius:6px; }
 </style>
 </head>
 
@@ -108,10 +105,10 @@ const slaTimer = document.getElementById("slaTimer");
 
 let assignedAgent = null;
 
-// JOIN ROOM
+// JOIN
 socket.emit("join_ticket", { ticket_id });
 
-// SLA TIMER
+// SLA
 let start = Date.now();
 setInterval(()=>{
     let diff = 300000 - (Date.now()-start);
@@ -128,7 +125,7 @@ function system(msg){
     scroll();
 }
 
-// ADD MESSAGE
+// 🔥 FULL FIXED MESSAGE HANDLER
 function addMessage(msg,sender,time="",agent="Agent"){
     let row=document.createElement("div");
     row.className="msg-row";
@@ -140,7 +137,27 @@ function addMessage(msg,sender,time="",agent="Agent"){
     let bubble=document.createElement("div");
     bubble.className="bubble "+sender;
 
-    bubble.innerText = msg;
+    // 🔥 FILE SUPPORT FIX
+    if(msg.startsWith("[FILE]")){
+        let file=msg.replace("[FILE] ","");
+        let url="/uploads/"+file;
+        let ext=file.split('.').pop().toLowerCase();
+
+        if(["jpg","jpeg","png","gif","webp"].includes(ext)){
+            bubble.innerHTML=`<img src="${url}" onerror="this.src='https://via.placeholder.com/200?text=Image+Error'">`;
+        }
+        else if(["mp4","webm","ogg"].includes(ext)){
+            bubble.innerHTML=`<video controls><source src="${url}"></video>`;
+        }
+        else{
+            bubble.innerHTML=`<a href="${url}" target="_blank">📎 ${file}</a>`;
+        }
+
+        bubble.innerHTML += `<br><a href="/download/${file}">⬇ Download</a>`;
+    } else {
+        bubble.innerText = msg;
+    }
+
     bubble.innerHTML += `<div class="time">${time}</div>`;
 
     if(sender==="user"){
@@ -155,7 +172,6 @@ function addMessage(msg,sender,time="",agent="Agent"){
     scroll();
 }
 
-// SCROLL
 function scroll(){ box.scrollTop = box.scrollHeight; }
 
 // LOAD HISTORY
@@ -189,7 +205,7 @@ fileInput.onchange=()=>{
     .then(()=>addMessage("[FILE] "+file.name,"user"));
 };
 
-// REALTIME MESSAGE
+// REALTIME
 socket.on("new_message",data=>{
     if(data.ticket_id==ticket_id){
         addMessage(data.message,data.sender,data.time,data.agent);
@@ -205,21 +221,20 @@ socket.on("assigned", data=>{
     }
 });
 
-// TRANSFERRING
-socket.on("agent_transferring", data=>{
-    if(data.ticket_id == ticket_id){
-        system(`🔁 <b>${data.from}</b> is transferring your chat...`);
-        agentStatus.innerText = "● Transferring...";
-    }
-});
-
-// TRANSFER COMPLETE
+// TRANSFER
 socket.on("agent_transfer",data=>{
     if(data.ticket_id == ticket_id){
         assignedAgent = data.to;
         system(`🔁 Chat transferred to <b>${data.to}</b>`);
         agentStatus.innerText = "● Assigned to " + data.to;
     }
+});
+
+// CLOSED
+socket.on("ticket_closed", data=>{
+    agentStatus.innerText = "🔒 Closed";
+    system("🔒 Ticket closed");
+    messageInput.disabled = true;
 });
 
 // TYPING
@@ -234,16 +249,6 @@ socket.on("typing",data=>{
 function goBack(){
     window.location.href="/my-tickets";
 }
-socket.on("ticket_closed", data => {
-    // 🔥 Update status
-    document.getElementById("agentStatus").innerText = "🔒 Closed";
-
-    // 🔥 Show system message
-    system("🔒 This ticket has been closed");
-
-    // 🔥 Disable input
-    document.getElementById("messageInput").disabled = true;
-});
 
 // INIT
 window.onload=()=>{
