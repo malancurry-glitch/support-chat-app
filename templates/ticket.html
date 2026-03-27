@@ -105,6 +105,11 @@ const slaTimer = document.getElementById("slaTimer");
 
 let assignedAgent = null;
 
+// TIME HELPER
+function nowTime(){
+    return new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+}
+
 // JOIN
 socket.emit("join_ticket", { ticket_id });
 
@@ -116,16 +121,16 @@ setInterval(()=>{
     slaTimer.innerText = "Response SLA: " + Math.floor(diff/1000) + "s";
 },1000);
 
-// SYSTEM MESSAGE
+// SYSTEM MESSAGE WITH TIME
 function system(msg){
     let div=document.createElement("div");
     div.className="system";
-    div.innerHTML=msg;
+    div.innerHTML = `${msg}<br><small>${nowTime()}</small>`;
     box.appendChild(div);
     scroll();
 }
 
-// 🔥 FULL FIXED MESSAGE HANDLER
+// MESSAGE
 function addMessage(msg,sender,time="",agent="Agent"){
     let row=document.createElement("div");
     row.className="msg-row";
@@ -137,7 +142,7 @@ function addMessage(msg,sender,time="",agent="Agent"){
     let bubble=document.createElement("div");
     bubble.className="bubble "+sender;
 
-    // 🔥 FILE SUPPORT FIX
+    // FILE SUPPORT
     if(msg.startsWith("[FILE]")){
         let file=msg.replace("[FILE] ","");
         let url="/uploads/"+file;
@@ -189,7 +194,7 @@ function sendMessage(){
     if(!msg) return;
 
     socket.emit("send_message",{ticket_id,sender:"user",message:msg});
-    addMessage(msg,"user",new Date().toLocaleTimeString());
+    addMessage(msg,"user",nowTime());
     messageInput.value="";
 }
 
@@ -202,26 +207,48 @@ fileInput.onchange=()=>{
     form.append("file",file);
 
     fetch(`/upload/${ticket_id}`,{method:"POST",body:form})
-    .then(()=>addMessage("[FILE] "+file.name,"user"));
+    .then(()=>addMessage("[FILE] "+file.name,"user",nowTime()));
 };
 
-// REALTIME
+// REALTIME MESSAGE
 socket.on("new_message",data=>{
     if(data.ticket_id==ticket_id){
         addMessage(data.message,data.sender,data.time,data.agent);
     }
 });
 
-// ASSIGNED
+// 🔥 AGENT JOIN
+socket.on("agent_join", data=>{
+    if(data.ticket_id==ticket_id){
+        system(`🟢 <b>${data.agent}</b> joined the chat`);
+    }
+});
+
+// 🔥 AGENT LEAVE
+socket.on("agent_leave", data=>{
+    if(data.ticket_id==ticket_id){
+        system(`🔴 <b>${data.agent}</b> left the chat`);
+    }
+});
+
+// 🔥 ASSIGNED
 socket.on("assigned", data=>{
     if(data.ticket_id == ticket_id){
         assignedAgent = data.agent;
-        system(`<b>${assignedAgent}</b> is now handling your ticket`);
+        system(`👤 <b>${assignedAgent}</b> is now handling your ticket`);
         agentStatus.innerText = "● Assigned to " + assignedAgent;
     }
 });
 
-// TRANSFER
+// 🔥 TRANSFER START
+socket.on("agent_transferring", data=>{
+    if(data.ticket_id == ticket_id){
+        system(`🔁 <b>${data.from}</b> is transferring your chat...`);
+        agentStatus.innerText = "● Transferring...";
+    }
+});
+
+// 🔥 TRANSFER COMPLETE
 socket.on("agent_transfer",data=>{
     if(data.ticket_id == ticket_id){
         assignedAgent = data.to;
@@ -230,7 +257,7 @@ socket.on("agent_transfer",data=>{
     }
 });
 
-// CLOSED
+// 🔥 CLOSED
 socket.on("ticket_closed", data=>{
     agentStatus.innerText = "🔒 Closed";
     system("🔒 Ticket closed");
