@@ -105,7 +105,20 @@ const slaTimer = document.getElementById("slaTimer");
 
 let assignedAgent = null;
 
-// TIME HELPER
+// 🔥 AGENT NAME MAP (EDIT THIS)
+const AGENT_NAMES = {
+    "monkeyleft": "John",
+    "yash220419955": "Yash",
+    "mhfggsx": "Michael",
+    "mate_him": "Ali"
+};
+
+// 🔥 GET DISPLAY NAME
+function getName(username){
+    return AGENT_NAMES[username] || username;
+}
+
+// TIME
 function nowTime(){
     return new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
 }
@@ -121,7 +134,7 @@ setInterval(()=>{
     slaTimer.innerText = "Response SLA: " + Math.floor(diff/1000) + "s";
 },1000);
 
-// SYSTEM MESSAGE WITH TIME
+// SYSTEM MESSAGE
 function system(msg){
     let div=document.createElement("div");
     div.className="system";
@@ -137,7 +150,7 @@ function addMessage(msg,sender,time="",agent="Agent"){
 
     let avatar=document.createElement("div");
     avatar.className="avatar " + (sender==="user"?"user-avatar":"admin-avatar");
-    avatar.innerText = sender==="user" ? "U" : (agent ? agent[0].toUpperCase() : "A");
+    avatar.innerText = sender==="user" ? "U" : getName(agent)[0];
 
     let bubble=document.createElement("div");
     bubble.className="bubble "+sender;
@@ -149,7 +162,7 @@ function addMessage(msg,sender,time="",agent="Agent"){
         let ext=file.split('.').pop().toLowerCase();
 
         if(["jpg","jpeg","png","gif","webp"].includes(ext)){
-            bubble.innerHTML=`<img src="${url}" onerror="this.src='https://via.placeholder.com/200?text=Image+Error'">`;
+            bubble.innerHTML=`<img src="${url}">`;
         }
         else if(["mp4","webm","ogg"].includes(ext)){
             bubble.innerHTML=`<video controls><source src="${url}"></video>`;
@@ -210,7 +223,7 @@ fileInput.onchange=()=>{
     .then(()=>addMessage("[FILE] "+file.name,"user",nowTime()));
 };
 
-// REALTIME MESSAGE
+// REALTIME
 socket.on("new_message",data=>{
     if(data.ticket_id==ticket_id){
         addMessage(data.message,data.sender,data.time,data.agent);
@@ -220,14 +233,14 @@ socket.on("new_message",data=>{
 // 🔥 AGENT JOIN
 socket.on("agent_join", data=>{
     if(data.ticket_id==ticket_id){
-        system(`🟢 <b>${data.agent}</b> joined the chat`);
+        system(`🟢 <b>${getName(data.agent)}</b> joined the chat`);
     }
 });
 
 // 🔥 AGENT LEAVE
 socket.on("agent_leave", data=>{
     if(data.ticket_id==ticket_id){
-        system(`🔴 <b>${data.agent}</b> left the chat`);
+        system(`🔴 <b>${getName(data.agent)}</b> left the chat`);
     }
 });
 
@@ -235,16 +248,19 @@ socket.on("agent_leave", data=>{
 socket.on("assigned", data=>{
     if(data.ticket_id == ticket_id){
         assignedAgent = data.agent;
-        system(`👤 <b>${assignedAgent}</b> is now handling your ticket`);
-        agentStatus.innerText = "● Assigned to " + assignedAgent;
+        system(`👤 <b>${getName(assignedAgent)}</b> is now handling your ticket`);
+
+        agentStatus.innerText = "● Assigned to " + getName(assignedAgent);
+        agentStatus.style.background = "#22c55e"; // green
     }
 });
 
 // 🔥 TRANSFER START
 socket.on("agent_transferring", data=>{
     if(data.ticket_id == ticket_id){
-        system(`🔁 <b>${data.from}</b> is transferring your chat...`);
+        system(`🔁 <b>${getName(data.from)}</b> is transferring your chat...`);
         agentStatus.innerText = "● Transferring...";
+        agentStatus.style.background = "#f59e0b"; // orange
     }
 });
 
@@ -252,22 +268,27 @@ socket.on("agent_transferring", data=>{
 socket.on("agent_transfer",data=>{
     if(data.ticket_id == ticket_id){
         assignedAgent = data.to;
-        system(`🔁 Chat transferred to <b>${data.to}</b>`);
-        agentStatus.innerText = "● Assigned to " + data.to;
+        system(`🔁 Chat transferred to <b>${getName(data.to)}</b>`);
+
+        agentStatus.innerText = "● Assigned to " + getName(data.to);
+        agentStatus.style.background = "#22c55e";
     }
 });
 
-// 🔥 CLOSED
+// 🔥 CLOSED (RED STATUS)
 socket.on("ticket_closed", data=>{
-    agentStatus.innerText = "🔒 Closed";
+    agentStatus.innerText = "● Closed";
+    agentStatus.style.background = "#ef4444"; // 🔥 RED
+
     system("🔒 Ticket closed");
+
     messageInput.disabled = true;
 });
 
 // TYPING
 socket.on("typing",data=>{
     if(data.agent === assignedAgent){
-        typingEl.innerText = data.agent + " is typing...";
+        typingEl.innerText = getName(data.agent) + " is typing...";
         setTimeout(()=>typingEl.innerText="",1000);
     }
 });
